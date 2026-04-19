@@ -192,6 +192,7 @@ impl VeraClientBuilder {
             base_url,
             http,
             max_retries: self.max_retries.unwrap_or(3),
+            bearer,
         })
     }
 }
@@ -202,6 +203,7 @@ pub struct VeraClient {
     base_url: String,
     http: Client,
     max_retries: u32,
+    bearer: String,
 }
 
 impl VeraClient {
@@ -229,6 +231,20 @@ impl VeraClient {
         self.post_with_retry(&url, body).await
     }
 
+    /// Build the WebSocket URL for streaming: `wss://{host}/v1/stream/{connector}?token={bearer}`.
+    /// Use this with `tokio-tungstenite` or any WebSocket client.
+    ///
+    /// Mode 3 (bidirectional streaming) — auth fires once on upgrade;
+    /// send audio/text chunks, receive response chunks in real-time.
+    #[must_use]
+    pub fn ws_url(&self, connector: &str) -> String {
+        let ws_base = self
+            .base_url
+            .replace("https://", "wss://")
+            .replace("http://", "ws://");
+        format!("{ws_base}/v1/stream/{connector}?token={}", self.bearer)
+    }
+
     /// Clone the client with a new session id attached. Cheap — shares
     /// the underlying connection pool.
     #[must_use]
@@ -245,6 +261,7 @@ impl VeraClient {
             base_url: self.base_url.clone(),
             http,
             max_retries: self.max_retries,
+            bearer: self.bearer.clone(),
         }
     }
 

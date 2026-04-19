@@ -43,6 +43,76 @@ export VERA_INSECURE=1  # only for self-signed certs in dev
 cargo run
 ```
 
+## Three transport modes
+
+Vera supports three ways to communicate, all authenticated and policy-gated:
+
+### Mode 1 — Request/Response (HTTP POST)
+
+```rust
+// Text prompt → LLM → complete response
+let resp = client.infer("llm-local", b"What is Rust?").await?;
+println!("{}", String::from_utf8_lossy(&resp.body));
+
+// Plugin composition (e.g. voice pipeline)
+let resp = client.plugin("voice-pipeline", audio_bytes).await?;
+```
+
+### Mode 2 — Streaming response (chunked HTTP)
+
+For LLM token streaming — tokens arrive as they generate.
+
+Requires a **proxy connector** on the Hub with `stream_response = true`:
+```toml
+# vera.toml on the Hub
+[[proxy_connectors]]
+id = "llm-anthropic"
+upstream_url = "https://api.anthropic.com/v1/messages"
+stream_response = true
+[proxy_connectors.upstream_headers]
+x-api-key = "$ANTHROPIC_API_KEY"
+content-type = "application/json"
+```
+
+Client code:
+```rust
+// The response body arrives as chunked HTTP — process chunks as they arrive
+let resp = client.infer("llm-anthropic", prompt_json).await?;
+// resp.body contains the full streamed response collected by the SDK
+// For true chunk-by-chunk processing, use reqwest directly against the same URL
+```
+
+### Mode 3 — WebSocket bidirectional (real-time voice)
+
+For real-time streaming — send audio chunks, receive text chunks simultaneously.
+
+```rust
+// Get the authenticated WebSocket URL
+let ws_url = client.ws_url("moonshine");
+// → "wss://vera:8443/v1/stream/moonshine?token=vk_..."
+
+// Connect with any WebSocket client (e.g. tokio-tungstenite)
+// Auth fires once on upgrade; each message runs through QoS + vault
+```
+
+Example with `tokio-tungstenite`:
+```rust
+use tokio_tungstenite::{connect_async, tungstenite::Message};
+use futures_util::{SinkExt, StreamExt};
+
+let (mut ws, _) = connect_async(&client.ws_url("moonshine")).await?;
+
+// Send audio chunk
+ws.send(Message::Binary(audio_chunk.into())).await?;
+
+// Receive transcription
+if let Some(Ok(Message::Binary(text))) = ws.next().await {
+    println!("Transcript: {}", String::from_utf8_lossy(&text));
+}
+
+ws.close(None).await?;
+```
+
 ## SDK reference
 
 ### `VeraClient::builder()`
@@ -57,21 +127,45 @@ cargo run
 | `.connect_timeout(Duration)` | No | TCP connect timeout (default 10s) |
 | `.danger_accept_invalid_certs(true)` | No | Dev only — accept self-signed TLS certs |
 
-### Calling connectors and plugins
+### Methods
+
+| Method | Transport | Description |
+|---|---|---|
+| `client.infer(connector, body)` | Mode 1 (POST) | Call a connector, get complete response |
+| `client.plugin(plugin_id, body)` | Mode 1 (POST) | Call a plugin |
+| `client.ws_url(connector)` | Mode 3 (WS) | Build authenticated WebSocket URL |
+| `client.with_session(id)` | All | Clone with session id attached |
+
+### Error handling
 
 ```rust
-// Call a connector: POST /v1/infer/{connector}
-let resp = client.infer("llm-local", b"your prompt").await?;
-let resp = client.infer("echo", b"ping").await?;
+use vera_client::VeraError;
 
-// Call a plugin: POST /v1/plugin/{plugin_id}
-let resp = client.plugin("voice-pipeline", audio_bytes).await?;
+match client.infer("llm-local", prompt).await {
+    Ok(resp) => println!("{}", String::from_utf8_lossy(&resp.body)),
+    Err(VeraError::Unauthorized) => eprintln!("Bad token"),
+    Err(VeraError::Forbidden) => eprintln!("Policy denied"),
+    Err(VeraError::Throttled { retry_after_secs, .. }) => eprintln!("Rate limited — retry in {retry_after_secs}s"),
+    Err(VeraError::VaultBlocked { rules, .. }) => eprintln!("PII detected: {rules:?}"),
+    Err(VeraError::Server { status, message }) => eprintln!("Server error {status}: {message}"),
+    Err(VeraError::Transport(e)) => eprintln!("Network: {e}"),
+    Err(VeraError::Config(msg)) => eprintln!("Config: {msg}"),
+}
 ```
 
-### Multi-turn sessions
+## Available connectors
+
+| Connector | Type | Mode | What it does |
+|---|---|---|---|
+| `echo` | Wasm | 1 | Returns input unchanged (testing) |
+| `llm-local` | Wasm | 1 | Text prompt → Qwen 3 0.6B via Ollama |
+| `moonshine` | Wasm | 1, 3 | Audio bytes → transcript via Whisper |
+| `proxy` | Wasm | 1 | GETs a URL, returns response |
+| Proxy connectors | HTTP proxy | 1, 2 | Operator-declared upstream URL with optional streaming |
+
+## Multi-turn sessions
 
 ```rust
-// All calls share a session id for audit correlation
 let session = VeraClient::builder()
     .url("https://vera:8443")
     .bearer_from_env("VERA_TOKEN")
@@ -83,64 +177,22 @@ let turn2 = session.infer("llm-local", b"Give me an example").await?;
 // Both turns grouped in the audit chain under session "conversation-abc-123"
 ```
 
-### Error handling
+## What Vera handles server-side
 
-```rust
-use vera_client::VeraError;
+Your app doesn't implement any of these — the gateway enforces them on every call:
 
-match client.infer("llm-local", prompt).await {
-    Ok(resp) => {
-        println!("{}", String::from_utf8_lossy(&resp.body));
-    }
-    Err(VeraError::Unauthorized) => {
-        eprintln!("Bad token — check VERA_TOKEN");
-    }
-    Err(VeraError::Forbidden) => {
-        eprintln!("Policy denied — principal not authorized for this connector");
-    }
-    Err(VeraError::Throttled { retry_after_secs, .. }) => {
-        eprintln!("Rate limited — retry in {retry_after_secs}s");
-    }
-    Err(VeraError::VaultBlocked { rules, .. }) => {
-        eprintln!("PII detected — rules violated: {rules:?}");
-    }
-    Err(VeraError::Server { status, message }) => {
-        eprintln!("Server error {status}: {message}");
-    }
-    Err(VeraError::Transport(e)) => {
-        eprintln!("Network error: {e}");
-    }
-    Err(VeraError::Config(msg)) => {
-        eprintln!("Client config error: {msg}");
-    }
-}
-```
-
-## Available connectors
-
-| Connector | Type | What it does |
-|---|---|---|
-| `echo` | Text | Returns input unchanged (testing) |
-| `llm-local` | Text | POSTs prompt to local Ollama (Qwen 3 0.6B) and returns generated text |
-| `proxy` | HTTP | GETs a URL from the body, returns response |
-| `moonshine` | Audio→Text | Sends audio to Moonshine ASR, returns transcript |
-
-### Using `llm-local`
-
-```rust
-// Simple prompt
-let resp = client.infer("llm-local", b"What is 2+2?").await?;
-
-// The connector sends to Ollama's /api/generate endpoint
-// Model: Qwen 3 0.6B (configurable at connector compile time)
-// Response: generated text only (not JSON)
-```
+- **Authentication** — token → principal resolution
+- **Policy** — which connectors each principal can call + content deny patterns
+- **Rate limiting** — multi-dimensional QoS (per principal, connector, upstream host)
+- **PII scanning** — regex-based vault in observe/block mode
+- **Audit chain** — BLAKE3 hash-chained, Ed25519-signed sealed segments
+- **Egress control** — connectors can only reach allow-listed hosts
+- **Upstream backpressure** — exponential cooldown on failing upstreams
+- **Metrics** — Prometheus scrape endpoint for dashboards
 
 ## Demo apps
 
 ### `demos/echo/`
-
-Simplest possible client — calls the echo connector and prints the response.
 
 ```bash
 cd demos/echo
@@ -148,46 +200,18 @@ export VERA_URL="https://your-vera-hub:8443"
 export VERA_TOKEN="your_token"
 export VERA_INSECURE=1
 cargo run -- "Hello, Vera!"
-# → POST /v1/infer/echo: Hello, Vera!
-# ← 200 (12): Hello, Vera!
 ```
-
-## What Vera handles server-side
-
-Your app doesn't need to implement any of these — the gateway enforces them on every call:
-
-- **Authentication** — token → principal resolution
-- **Policy** — which connectors each principal can call
-- **Rate limiting** — multi-dimensional QoS (per principal, connector, upstream host)
-- **PII scanning** — regex-based vault in observe/block mode
-- **Audit chain** — BLAKE3 hash-chained, Ed25519-signed sealed segments
-- **Egress control** — connectors can only reach allow-listed hosts
-- **Metrics** — Prometheus scrape endpoint for dashboards
 
 ## Setup: getting a token
 
-Ask your Vera operator to create a principal for your app:
-
 ```bash
-# On the vera-hub host:
+# On the vera-hub host
 vera-hub keys create --keystore /path/to/keystore.redb --principal my-app
 # Prints: vk_64hexchars...  ← this is your VERA_TOKEN
 ```
-
-Or via the admin API:
-
-```bash
-curl -X POST https://vera-hub:9090/admin/keys \
-  -H "Authorization: Bearer <operator-token>" \
-  -d '{"principal": "my-app"}'
-# Returns: {"id":"...","principal":"my-app","secret":"vk_..."}
-```
-
-## Building voice apps
-
-See [GUIDE-VOICE-PLUGIN.md](GUIDE-VOICE-PLUGIN.md) for how to compose STT → LLM → TTS pipelines using Vera plugins with `dispatch.call`, session-id correlation, and per-pipeline audit.
 
 ## Links
 
 - [Vera Gateway](https://github.com/bssingh/vera) — the gateway itself
 - [GUIDE-VOICE-PLUGIN.md](GUIDE-VOICE-PLUGIN.md) — voice app developer guide
+- [Architecture](https://github.com/bssingh/vera/blob/main/docs/ARCHITECTURE.md) — pipeline, streaming, transport modes
