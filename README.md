@@ -215,3 +215,50 @@ vera-hub keys create --keystore /path/to/keystore.redb --principal my-app
 - [Vera Gateway](https://github.com/bssingh/vera) — the gateway itself
 - [GUIDE-VOICE-PLUGIN.md](GUIDE-VOICE-PLUGIN.md) — voice app developer guide
 - [Architecture](https://github.com/bssingh/vera/blob/main/docs/ARCHITECTURE.md) — pipeline, streaming, transport modes
+
+## Running agents
+
+Agents are multi-step AI workflows: LLM decides → tools execute → repeat until done.
+
+### One-shot (complete result)
+
+```rust
+let resp = client.run_agent("assistant", "What is 2+2? Think step by step.").await?;
+let result: serde_json::Value = serde_json::from_slice(&resp.body)?;
+println!("Answer: {}", result["answer"]);
+println!("Steps: {}", result["steps"]);
+```
+
+### Streaming (live steps via WebSocket)
+
+```rust
+let ws_url = client.agent_ws_url("assistant");
+// Connect with tokio-tungstenite, send prompt as first message,
+// receive AgentStep JSON objects as each step completes:
+// {"step":1,"action":"llm","content":"thinking..."}
+// {"step":1,"action":"tool","tool":"echo","content":"result"}
+// {"step":2,"action":"done","content":"The answer is 4"}
+```
+
+### Multi-turn (session memory)
+
+```rust
+let session = VeraClient::builder()
+    .url("https://vera:8443")
+    .bearer_from_env("VERA_TOKEN")
+    .session_id("conversation-123")
+    .build()?;
+
+// First turn — agent remembers
+let r1 = session.run_agent("assistant", "My name is Alice").await?;
+// Second turn — agent recalls from context
+let r2 = session.run_agent("assistant", "What is my name?").await?;
+```
+
+### Agent discovery
+
+```rust
+let models = client.discover().await?;
+// Also check GET /v1/agents for available agents:
+// curl https://vera:8443/v1/agents -H "Authorization: Bearer $TOKEN"
+```

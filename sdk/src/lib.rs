@@ -349,6 +349,31 @@ impl VeraClient {
         }
     }
 
+    /// Run an agent: `POST /v1/agent/{agent_id}`. Body is the prompt.
+    /// Returns the `AgentResult` JSON (answer + step trace).
+    ///
+    /// # Errors
+    /// See [`VeraError`] variants.
+    pub async fn run_agent(&self, agent_id: &str, prompt: &str) -> Result<InferResponse, VeraError> {
+        let url = format!("{}/v1/agent/{agent_id}", self.base_url);
+        self.post_with_retry(&url, prompt.as_bytes()).await
+    }
+
+    /// Build the WebSocket URL for agent streaming:
+    /// `wss://{host}/v1/agent/{id}/stream?token={bearer}`.
+    /// First WS message = prompt; server streams `AgentStep` JSON objects.
+    #[must_use]
+    pub fn agent_ws_url(&self, agent_id: &str) -> String {
+        let ws_base = self
+            .base_url
+            .replace("https://", "wss://")
+            .replace("http://", "ws://");
+        format!(
+            "{ws_base}/v1/agent/{agent_id}/stream?token={}",
+            self.bearer
+        )
+    }
+
     /// Explicit POST dispatch: `POST /v1/infer/{model}`.
     ///
     /// # Errors
