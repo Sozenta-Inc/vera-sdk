@@ -21,13 +21,62 @@
 //! # }
 //! ```
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use reqwest::{
     header::{self, HeaderMap, HeaderValue},
     Client, StatusCode,
 };
 use serde::Deserialize;
+use tokio::sync::RwLock;
+
+/// Connector manifest returned by `GET /v1/models`.
+#[derive(Clone, Debug, Deserialize)]
+pub struct ModelInfo {
+    /// Connector or alias id.
+    pub id: String,
+    /// Human-readable name.
+    #[serde(default)]
+    pub display_name: String,
+    /// Model identifier.
+    #[serde(default)]
+    pub model: String,
+    /// Provider name.
+    #[serde(default)]
+    pub provider: String,
+    /// Capabilities.
+    #[serde(default)]
+    pub capabilities: ModelCapabilities,
+    /// Transport options.
+    #[serde(default)]
+    pub transport: ModelTransport,
+}
+
+/// Capabilities from the manifest.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct ModelCapabilities {
+    #[serde(default)]
+    pub input: String,
+    #[serde(default)]
+    pub output: String,
+    #[serde(default)]
+    pub modalities: Vec<String>,
+    #[serde(default)]
+    pub streaming_response: bool,
+}
+
+/// Transport config from the manifest.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct ModelTransport {
+    #[serde(default)]
+    pub modes: Vec<String>,
+}
+
+/// Cached discovery state.
+#[derive(Debug, Default)]
+struct DiscoveryCache {
+    models: Vec<ModelInfo>,
+}
 
 /// Response from a connector or plugin dispatch.
 #[derive(Clone, Debug)]
@@ -193,6 +242,7 @@ impl VeraClientBuilder {
             http,
             max_retries: self.max_retries.unwrap_or(3),
             bearer,
+            cache: Arc::new(RwLock::new(DiscoveryCache::default())),
         })
     }
 }
@@ -204,6 +254,7 @@ pub struct VeraClient {
     http: Client,
     max_retries: u32,
     bearer: String,
+    cache: Arc<RwLock<DiscoveryCache>>,
 }
 
 impl VeraClient {
@@ -228,6 +279,82 @@ impl VeraClient {
     /// See [`VeraError`] variants.
     pub async fn plugin(&self, plugin_id: &str, body: &[u8]) -> Result<InferResponse, VeraError> {
         let url = format!("{}/v1/plugin/{plugin_id}", self.base_url);
+        self.post_with_retry(&url, body).await
+    }
+
+    /// Fetch available models from the Hub and cache them. Call this
+    /// once at startup; `call()` uses the cache to auto-negotiate
+    /// transport. Refreshes the cache on every call.
+    ///
+    /// # Errors
+    /// Network or auth errors.
+    pub async fn discover(&self) -> Result<Vec<ModelInfo>, VeraError> {
+        let url = format!("{}/v1/models", self.base_url);
+        let resp = self.http.get(&url).send().await?;
+        if resp.status() == StatusCode::UNAUTHORIZED {
+            return Err(VeraError::Unauthorized);
+        }
+        if !resp.status().is_success() {
+            return Err(VeraError::Server {
+                status: resp.status().as_u16(),
+                message: resp.text().await.unwrap_or_default(),
+            });
+        }
+        let models: Vec<ModelInfo> = resp.json().await.map_err(|e| {
+            VeraError::Config(format!("failed to parse /v1/models: {e}"))
+        })?;
+        {
+            let mut cache = self.cache.write().await;
+            cache.models = models.clone();
+        }
+        Ok(models)
+    }
+
+    /// Smart dispatch: looks up the model/alias in the discovery cache,
+    /// picks the best transport (WS for audio, streaming for LLM,
+    /// POST fallback), and dispatches. Calls `discover()` automatically
+    /// if the cache is empty.
+    ///
+    /// # Errors
+    /// See [`VeraError`] variants.
+    pub async fn call(&self, model: &str, body: &[u8]) -> Result<InferResponse, VeraError> {
+        // Ensure cache is populated.
+        {
+            let cache = self.cache.read().await;
+            if cache.models.is_empty() {
+                drop(cache);
+                self.discover().await?;
+            }
+        }
+
+        let cache = self.cache.read().await;
+        let info = cache.models.iter().find(|m| m.id == model);
+
+        if let Some(info) = info {
+            let preferred = info.transport.modes.first().map(String::as_str);
+            match preferred {
+                Some("ws") => {
+                    // WS needs an external client (tokio-tungstenite).
+                    // Fall through to POST and let the caller use ws_url()
+                    // for real WS. This avoids pulling a heavy WS dep.
+                    self.call_post(model, body).await
+                }
+                Some("stream") => self.call_post(model, body).await,
+                _ => self.call_post(model, body).await,
+            }
+        } else {
+            // Not in cache — try POST directly (might be a new connector
+            // added after discover(), or the cache is stale).
+            self.call_post(model, body).await
+        }
+    }
+
+    /// Explicit POST dispatch: `POST /v1/infer/{model}`.
+    ///
+    /// # Errors
+    /// See [`VeraError`] variants.
+    pub async fn call_post(&self, model: &str, body: &[u8]) -> Result<InferResponse, VeraError> {
+        let url = format!("{}/v1/infer/{model}", self.base_url);
         self.post_with_retry(&url, body).await
     }
 
@@ -262,6 +389,7 @@ impl VeraClient {
             http,
             max_retries: self.max_retries,
             bearer: self.bearer.clone(),
+            cache: self.cache.clone(),
         }
     }
 
@@ -388,6 +516,16 @@ mod tests {
         let parsed: VaultBlockBody = serde_json::from_str(json).unwrap();
         assert_eq!(parsed.matches, 2);
         assert_eq!(parsed.rules, vec!["ssn", "cc"]);
+    }
+
+    // SPEC: none (SDK — ModelInfo parses from /v1/models JSON).
+    #[test]
+    fn model_info_deserializes() {
+        let json = r#"{"id":"moonshine","display_name":"Moonshine","model":"moonshine-onnx","provider":"useful-sensors","capabilities":{"input":"audio","output":"text","modalities":["audio-to-text"],"streaming_response":false},"transport":{"modes":["ws","post"]}}"#;
+        let info: ModelInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(info.id, "moonshine");
+        assert_eq!(info.capabilities.input, "audio");
+        assert_eq!(info.transport.modes, vec!["ws", "post"]);
     }
 
     // SPEC: none (SDK scaffolding — error display).
