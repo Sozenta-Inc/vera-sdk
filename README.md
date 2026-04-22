@@ -13,7 +13,22 @@ vera-client = { git = "https://github.com/bssingh/vera-sdk.git", path = "sdk" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
-### 2. Connect and call
+### 2. Get a token
+
+On the Vera hub host:
+```bash
+vera-hub keys --keystore ~/vera/data/keystore.redb create --principal my-app
+# Prints: ef2cbfdd...56c  ← this is your VERA_TOKEN (shown once, store it now)
+```
+
+The operator must also authorize your principal in the policy:
+```toml
+# policy-global.toml on the hub
+[principals.my-app]
+connectors = ["echo", "bedrock-claude", "llm-local", "moonshine"]
+```
+
+### 3. Connect and call
 
 ```rust
 use vera_client::VeraClient;
@@ -21,97 +36,166 @@ use vera_client::VeraClient;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = VeraClient::builder()
-        .url(std::env::var("VERA_URL")?)
+        .url("https://18.190.188.99:8443")     // Vera hub Elastic IP
         .bearer_from_env("VERA_TOKEN")
-        .danger_accept_invalid_certs(std::env::var("VERA_INSECURE").is_ok())
+        .danger_accept_invalid_certs(true)      // self-signed certs in dev
         .build()?;
 
-    // Call an LLM connector
-    let resp = client.infer("llm-local", b"Explain Rust in one sentence").await?;
+    // Call Claude via Bedrock
+    let resp = client.infer("bedrock-claude",
+        b"What is Rust? Answer in one sentence.").await?;
     println!("{}", String::from_utf8_lossy(&resp.body));
 
     Ok(())
 }
 ```
 
-### 3. Run it
+### 4. Run it
 
 ```bash
-export VERA_URL="https://your-vera-hub:8443"
-export VERA_TOKEN="your_bearer_token_here"
+export VERA_URL="https://18.190.188.99:8443"
+export VERA_TOKEN="ef2cbfdde0d1b0cb55d0610fea24754531436a761a35db942e5414cab9f9656c"
 export VERA_INSECURE=1  # only for self-signed certs in dev
 cargo run
 ```
 
-## Three transport modes
+## Authentication
 
-Vera supports three ways to communicate, all authenticated and policy-gated:
+Every request to Vera requires a bearer token. The token maps to a **principal** —
+an identity with a policy (which connectors it can access, rate limits, vault rules).
+
+| Step | Who | How |
+|------|-----|-----|
+| 1. Create key | Operator | `vera-hub keys create --principal <name>` |
+| 2. Authorize | Operator | Add principal to `policy-global.toml` |
+| 3. Use token | App | `Authorization: Bearer <token>` header |
+
+The SDK handles the header automatically via `.bearer()` or `.bearer_from_env()`.
+
+### Default test credentials (dev only)
+
+The deployed Vera hub at `18.190.188.99:8443` has a test principal:
+
+```bash
+export VERA_URL="https://18.190.188.99:8443"
+export VERA_TOKEN="ef2cbfdde0d1b0cb55d0610fea24754531436a761a35db942e5414cab9f9656c"
+```
+
+This principal (`test`) has access to: `echo`, `llm-local`, `bedrock-claude`, `llm-fallback`.
+
+## Available connectors
+
+| Connector | Type | Default | What it does |
+|---|---|---|---|
+| `bedrock-claude` | Proxy | **Yes** | Claude models via AWS Bedrock (Haiku 4.5, Sonnet 4.6, Opus) |
+| `llm-local` | Proxy | | Qwen 3 0.6B via local Ollama |
+| `echo` | Wasm | | Returns input unchanged (testing) |
+| `moonshine` | Wasm | | Audio → transcript via Moonshine ONNX |
+| `llm-fallback` | Fallback chain | | Tries bedrock-claude, falls back to llm-local |
+
+### Model aliases
+
+Operators can define aliases so apps don't hardcode connector names:
+
+```toml
+# vera.toml
+[[models]]
+name = "claude"
+connector = "bedrock-claude"
+
+[[models]]
+name = "default-llm"
+connector = "llm-local"
+```
+
+```rust
+// App calls the alias — operator controls which backend it maps to
+let resp = client.infer("claude", b"Hello").await?;
+```
+
+### Fallback chains
+
+Operator-declared retry paths — if the primary connector fails, Vera tries the next:
+
+```toml
+# vera.toml
+[[fallback_chains]]
+name = "llm-fallback"
+connectors = ["bedrock-claude", "llm-local"]
+```
+
+```rust
+// App calls the chain name — Vera handles failover transparently
+let resp = client.infer("llm-fallback", b"Hello").await?;
+```
+
+## Three transport modes
 
 ### Mode 1 — Request/Response (HTTP POST)
 
 ```rust
 // Text prompt → LLM → complete response
-let resp = client.infer("llm-local", b"What is Rust?").await?;
+let resp = client.infer("bedrock-claude", b"What is Rust?").await?;
 println!("{}", String::from_utf8_lossy(&resp.body));
-
-// Plugin composition (e.g. voice pipeline)
-let resp = client.plugin("voice-pipeline", audio_bytes).await?;
 ```
 
 ### Mode 2 — Streaming response (chunked HTTP)
 
-For LLM token streaming — tokens arrive as they generate.
+For LLM token streaming — tokens arrive as they generate:
 
-Requires a **proxy connector** on the Hub with `stream_response = true`:
-```toml
-# vera.toml on the Hub
-[[proxy_connectors]]
-id = "llm-anthropic"
-upstream_url = "https://api.anthropic.com/v1/messages"
-stream_response = true
-[proxy_connectors.upstream_headers]
-x-api-key = "$ANTHROPIC_API_KEY"
-content-type = "application/json"
-```
-
-Client code:
 ```rust
-// The response body arrives as chunked HTTP — process chunks as they arrive
-let resp = client.infer("llm-anthropic", prompt_json).await?;
+let resp = client.infer("bedrock-claude", prompt_json).await?;
 // resp.body contains the full streamed response collected by the SDK
-// For true chunk-by-chunk processing, use reqwest directly against the same URL
 ```
 
 ### Mode 3 — WebSocket bidirectional (real-time voice)
 
-For real-time streaming — send audio chunks, receive text chunks simultaneously.
+For real-time streaming — send audio chunks, receive text chunks:
 
 ```rust
-// Get the authenticated WebSocket URL
 let ws_url = client.ws_url("moonshine");
-// → "wss://vera:8443/v1/stream/moonshine?token=vk_..."
-
-// Connect with any WebSocket client (e.g. tokio-tungstenite)
-// Auth fires once on upgrade; each message runs through QoS + vault
+// Connect with tokio-tungstenite, send audio, receive transcripts
 ```
 
-Example with `tokio-tungstenite`:
+## Discovery
+
+Auto-discover available models and their capabilities:
+
 ```rust
-use tokio_tungstenite::{connect_async, tungstenite::Message};
-use futures_util::{SinkExt, StreamExt};
-
-let (mut ws, _) = connect_async(&client.ws_url("moonshine")).await?;
-
-// Send audio chunk
-ws.send(Message::Binary(audio_chunk.into())).await?;
-
-// Receive transcription
-if let Some(Ok(Message::Binary(text))) = ws.next().await {
-    println!("Transcript: {}", String::from_utf8_lossy(&text));
+let models = client.discover().await?;
+for m in &models {
+    println!("{}: {} ({}) — {:?}",
+        m.id, m.display_name, m.provider, m.capabilities.modalities);
 }
-
-ws.close(None).await?;
 ```
+
+Smart dispatch uses discovery to pick the best transport:
+
+```rust
+// Discovers models, picks transport, dispatches
+let resp = client.call("bedrock-claude", b"Hello").await?;
+```
+
+## Agents
+
+Run hosted agents that use LLMs + tools in a loop:
+
+```rust
+// Run the admin agent
+let result = client.run_agent("admin", "show me all API keys").await?;
+println!("{}", String::from_utf8_lossy(&result.body));
+
+// Agent streaming via WebSocket
+let ws_url = client.agent_ws_url("admin");
+// Connect, send prompt as first message, receive AgentStep JSON objects
+```
+
+### Available agents
+
+| Agent | Brain | Tools | What it does |
+|---|---|---|---|
+| `assistant` | llm-local | echo, llm-local | General assistant (sample) |
+| `admin` | llm-local | admin-api | Manage Vera via natural language |
 
 ## SDK reference
 
@@ -120,61 +204,47 @@ ws.close(None).await?;
 | Method | Required | Description |
 |---|---|---|
 | `.url("https://...")` | Yes | Hub base URL |
-| `.bearer("vk_...")` | Yes | Bearer token from `vera-hub keys create` |
+| `.bearer("vk_...")` | Yes | Bearer token |
 | `.bearer_from_env("VERA_TOKEN")` | Alt | Read token from env var |
-| `.session_id("session-123")` | No | Attach `X-Vera-Session` for multi-turn correlation |
+| `.session_id("session-123")` | No | Multi-turn session correlation |
 | `.max_retries(3)` | No | Max 429 retries (default 3) |
 | `.connect_timeout(Duration)` | No | TCP connect timeout (default 10s) |
-| `.danger_accept_invalid_certs(true)` | No | Dev only — accept self-signed TLS certs |
+| `.danger_accept_invalid_certs(true)` | No | Dev only — self-signed TLS |
 
 ### Methods
 
-| Method | Transport | Description |
-|---|---|---|
-| `client.infer(connector, body)` | Mode 1 (POST) | Call a connector, get complete response |
-| `client.plugin(plugin_id, body)` | Mode 1 (POST) | Call a plugin |
-| `client.ws_url(connector)` | Mode 3 (WS) | Build authenticated WebSocket URL |
-| `client.with_session(id)` | All | Clone with session id attached |
+| Method | Description |
+|---|---|
+| `client.infer(connector, body)` | Call a connector (Mode 1 POST) |
+| `client.call(model, body)` | Smart dispatch with auto-negotiation |
+| `client.discover()` | Fetch + cache available models |
+| `client.plugin(plugin_id, body)` | Call a plugin |
+| `client.run_agent(agent_id, prompt)` | Run a hosted agent |
+| `client.ws_url(connector)` | Build WebSocket URL (Mode 3) |
+| `client.agent_ws_url(agent_id)` | Build agent streaming WebSocket URL |
+| `client.with_session(id)` | Clone with session id |
 
 ### Error handling
 
 ```rust
 use vera_client::VeraError;
 
-match client.infer("llm-local", prompt).await {
+match client.infer("bedrock-claude", prompt).await {
     Ok(resp) => println!("{}", String::from_utf8_lossy(&resp.body)),
     Err(VeraError::Unauthorized) => eprintln!("Bad token"),
-    Err(VeraError::Forbidden) => eprintln!("Policy denied"),
-    Err(VeraError::Throttled { retry_after_secs, .. }) => eprintln!("Rate limited — retry in {retry_after_secs}s"),
-    Err(VeraError::VaultBlocked { rules, .. }) => eprintln!("PII detected: {rules:?}"),
-    Err(VeraError::Server { status, message }) => eprintln!("Server error {status}: {message}"),
+    Err(VeraError::Forbidden) => eprintln!("Not authorized for this connector"),
+    Err(VeraError::Throttled { retry_after_secs, .. }) => {
+        eprintln!("Rate limited — retry in {retry_after_secs}s")
+    }
+    Err(VeraError::VaultBlocked { rules, .. }) => {
+        eprintln!("PII detected: {rules:?}")
+    }
+    Err(VeraError::Server { status, message }) => {
+        eprintln!("Server error {status}: {message}")
+    }
     Err(VeraError::Transport(e)) => eprintln!("Network: {e}"),
     Err(VeraError::Config(msg)) => eprintln!("Config: {msg}"),
 }
-```
-
-## Available connectors
-
-| Connector | Type | Mode | What it does |
-|---|---|---|---|
-| `echo` | Wasm | 1 | Returns input unchanged (testing) |
-| `llm-local` | Wasm | 1 | Text prompt → Qwen 3 0.6B via Ollama |
-| `moonshine` | Wasm | 1, 3 | Audio bytes → transcript via Whisper |
-| `proxy` | Wasm | 1 | GETs a URL, returns response |
-| Proxy connectors | HTTP proxy | 1, 2 | Operator-declared upstream URL with optional streaming |
-
-## Multi-turn sessions
-
-```rust
-let session = VeraClient::builder()
-    .url("https://vera:8443")
-    .bearer_from_env("VERA_TOKEN")
-    .session_id("conversation-abc-123")
-    .build()?;
-
-let turn1 = session.infer("llm-local", b"What is Rust?").await?;
-let turn2 = session.infer("llm-local", b"Give me an example").await?;
-// Both turns grouped in the audit chain under session "conversation-abc-123"
 ```
 
 ## What Vera handles server-side
@@ -182,13 +252,13 @@ let turn2 = session.infer("llm-local", b"Give me an example").await?;
 Your app doesn't implement any of these — the gateway enforces them on every call:
 
 - **Authentication** — token → principal resolution
-- **Policy** — which connectors each principal can call + content deny patterns
-- **Rate limiting** — multi-dimensional QoS (per principal, connector, upstream host)
-- **PII scanning** — regex-based vault in observe/block mode
+- **Policy** — which connectors each principal can call (Lean 4 proven monotonicity)
+- **Content rules** — PII detection with observe/block/mask actions (Lean 4 proven non-bypass)
+- **Rate limiting** — 7-dimension QoS (principal, connector, group, agent, upstream, pairs, cooldown)
+- **Fallback chains** — automatic retry across connector chains on failure
 - **Audit chain** — BLAKE3 hash-chained, Ed25519-signed sealed segments
 - **Egress control** — connectors can only reach allow-listed hosts
-- **Upstream backpressure** — exponential cooldown on failing upstreams
-- **Metrics** — Prometheus scrape endpoint for dashboards
+- **Metrics** — Prometheus scrape endpoint
 
 ## Demo apps
 
@@ -196,69 +266,15 @@ Your app doesn't implement any of these — the gateway enforces them on every c
 
 ```bash
 cd demos/echo
-export VERA_URL="https://your-vera-hub:8443"
-export VERA_TOKEN="your_token"
+export VERA_URL="https://18.190.188.99:8443"
+export VERA_TOKEN="ef2cbfdde0d1b0cb55d0610fea24754531436a761a35db942e5414cab9f9656c"
 export VERA_INSECURE=1
 cargo run -- "Hello, Vera!"
-```
-
-## Setup: getting a token
-
-```bash
-# On the vera-hub host
-vera-hub keys create --keystore /path/to/keystore.redb --principal my-app
-# Prints: vk_64hexchars...  ← this is your VERA_TOKEN
 ```
 
 ## Links
 
 - [Vera Gateway](https://github.com/bssingh/vera) — the gateway itself
+- [Architecture](https://github.com/bssingh/vera/blob/main/docs/ARCHITECTURE.md) — pipeline, streaming, discovery, agents
 - [GUIDE-VOICE-PLUGIN.md](GUIDE-VOICE-PLUGIN.md) — voice app developer guide
-- [Architecture](https://github.com/bssingh/vera/blob/main/docs/ARCHITECTURE.md) — pipeline, streaming, transport modes
-
-## Running agents
-
-Agents are multi-step AI workflows: LLM decides → tools execute → repeat until done.
-
-### One-shot (complete result)
-
-```rust
-let resp = client.run_agent("assistant", "What is 2+2? Think step by step.").await?;
-let result: serde_json::Value = serde_json::from_slice(&resp.body)?;
-println!("Answer: {}", result["answer"]);
-println!("Steps: {}", result["steps"]);
-```
-
-### Streaming (live steps via WebSocket)
-
-```rust
-let ws_url = client.agent_ws_url("assistant");
-// Connect with tokio-tungstenite, send prompt as first message,
-// receive AgentStep JSON objects as each step completes:
-// {"step":1,"action":"llm","content":"thinking..."}
-// {"step":1,"action":"tool","tool":"echo","content":"result"}
-// {"step":2,"action":"done","content":"The answer is 4"}
-```
-
-### Multi-turn (session memory)
-
-```rust
-let session = VeraClient::builder()
-    .url("https://vera:8443")
-    .bearer_from_env("VERA_TOKEN")
-    .session_id("conversation-123")
-    .build()?;
-
-// First turn — agent remembers
-let r1 = session.run_agent("assistant", "My name is Alice").await?;
-// Second turn — agent recalls from context
-let r2 = session.run_agent("assistant", "What is my name?").await?;
-```
-
-### Agent discovery
-
-```rust
-let models = client.discover().await?;
-// Also check GET /v1/agents for available agents:
-// curl https://vera:8443/v1/agents -H "Authorization: Bearer $TOKEN"
-```
+- [Connector Guide](https://github.com/bssingh/vera/blob/main/connectors/README.md) — build your own connector

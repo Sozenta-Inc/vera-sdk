@@ -3,8 +3,9 @@
 //!
 //! Usage:
 //! ```bash
-//! export VERA_URL="https://localhost:8443"
-//! export VERA_TOKEN="vk_your_bearer_token_here"
+//! export VERA_URL="https://18.190.188.99:8443"
+//! export VERA_TOKEN="your_bearer_token_here"
+//! export VERA_INSECURE=1
 //! cargo run -p demo-echo -- "Hello, Vera!"
 //! ```
 
