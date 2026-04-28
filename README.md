@@ -272,6 +272,52 @@ export VERA_INSECURE=1
 cargo run -- "Hello, Vera!"
 ```
 
+## Deployment Profiles
+
+Vera ships three deployment profiles. Your SDK code doesn't change — only the server-side config differs.
+
+| Profile | Installer | Use case | Models |
+|---|---|---|---|
+| **Local** | `./deploy/install-local.sh` | On-device AI, no cloud. Data never leaves the machine. | Ollama (Qwen, Llama, etc.), Moonshine STT |
+| **Network** | `./deploy/install.sh` | Full deployment. Local + cloud models, forward proxy, all features. | Everything — Ollama + Bedrock + Anthropic + OpenAI |
+| **Policy Only** | `./deploy/install-policy.sh` | Security layer for cloud AI. No local inference. PII scanning, audit, compliance. | Bedrock Claude, Anthropic (proxy), OpenAI (proxy) |
+
+### Local Mode
+```bash
+# On-device — no cloud, no data leaves the machine
+./deploy/install-local.sh
+# App connects to http://127.0.0.1:8443
+```
+
+### Network Mode (full)
+```bash
+# All features — local models + cloud + proxy + forward proxy
+./deploy/install.sh
+# Edit vera.env with AWS creds
+sudo systemctl start vera-hub
+```
+
+### Policy Only Mode
+```bash
+# Security/compliance layer for cloud AI
+./deploy/install-policy.sh
+# Edit vera.env with AWS creds
+sudo systemctl start vera-hub
+# Apps use:
+#   HTTPS_PROXY=http://vera:8080 (transparent, no code changes)
+#   ANTHROPIC_BASE_URL=https://vera:8443/anthropic (reverse proxy)
+#   https://vera:8443/v1/infer/bedrock-claude (Vera API)
+```
+
+### What all profiles share
+- Pipeline: auth → policy → QoS → vault → dispatch → audit
+- Vault PII scanning (SSN + credit card with Luhn validation)
+- BLAKE3 hash-chained audit (EU AI Act Art. 12 compliant)
+- Lean 4 formal proofs (policy monotonicity, ingress non-bypass)
+- Wasm sandboxed connectors
+- Admin agent + chat UI
+- Same SDK — your app code doesn't change between profiles
+
 ## Links
 
 - [Vera Gateway](https://github.com/bssingh/vera) — the gateway itself
