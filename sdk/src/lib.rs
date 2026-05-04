@@ -300,9 +300,10 @@ impl VeraClient {
                 message: resp.text().await.unwrap_or_default(),
             });
         }
-        let models: Vec<ModelInfo> = resp.json().await.map_err(|e| {
-            VeraError::Config(format!("failed to parse /v1/models: {e}"))
-        })?;
+        let models: Vec<ModelInfo> = resp
+            .json()
+            .await
+            .map_err(|e| VeraError::Config(format!("failed to parse /v1/models: {e}")))?;
         {
             let mut cache = self.cache.write().await;
             cache.models = models.clone();
@@ -354,7 +355,11 @@ impl VeraClient {
     ///
     /// # Errors
     /// See [`VeraError`] variants.
-    pub async fn run_agent(&self, agent_id: &str, prompt: &str) -> Result<InferResponse, VeraError> {
+    pub async fn run_agent(
+        &self,
+        agent_id: &str,
+        prompt: &str,
+    ) -> Result<InferResponse, VeraError> {
         let url = format!("{}/v1/agent/{agent_id}", self.base_url);
         self.post_with_retry(&url, prompt.as_bytes()).await
     }
@@ -368,10 +373,7 @@ impl VeraClient {
             .base_url
             .replace("https://", "wss://")
             .replace("http://", "ws://");
-        format!(
-            "{ws_base}/v1/agent/{agent_id}/stream?token={}",
-            self.bearer
-        )
+        format!("{ws_base}/v1/agent/{agent_id}/stream?token={}", self.bearer)
     }
 
     /// Explicit POST dispatch: `POST /v1/infer/{model}`.
