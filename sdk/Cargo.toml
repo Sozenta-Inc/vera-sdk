@@ -3,7 +3,7 @@ name = "vera-client"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0 OR MIT"
-repository = "https://github.com/bssingh/vera-sdk"
+repository = "https://github.com/Sozenta-Inc/vera-sdk"
 description = "Rust SDK for Vera Secure AI Wasm Gateway."
 
 [dependencies]

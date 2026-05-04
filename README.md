@@ -1,6 +1,6 @@
 # Vera SDK
 
-Rust SDK, demos, and guides for building apps on the [Vera Secure AI Wasm Gateway](https://github.com/bssingh/vera).
+Rust SDK, demos, and guides for building apps on the [Vera Secure AI Wasm Gateway](https://github.com/Sozenta-Inc/vera).
 
 ## Quick start
 
@@ -9,7 +9,7 @@ Rust SDK, demos, and guides for building apps on the [Vera Secure AI Wasm Gatewa
 ```toml
 # Cargo.toml
 [dependencies]
-vera-client = { git = "https://github.com/bssingh/vera-sdk.git", path = "sdk" }
+vera-client = { git = "https://github.com/Sozenta-Inc/vera-sdk.git", path = "sdk" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
@@ -320,7 +320,7 @@ sudo systemctl start vera-hub
 
 ## Links
 
-- [Vera Gateway](https://github.com/bssingh/vera) — the gateway itself
-- [Architecture](https://github.com/bssingh/vera/blob/main/docs/ARCHITECTURE.md) — pipeline, streaming, discovery, agents
+- [Vera Gateway](https://github.com/Sozenta-Inc/vera) — the gateway itself
+- [Architecture](https://github.com/Sozenta-Inc/vera/blob/main/docs/ARCHITECTURE.md) — pipeline, streaming, discovery, agents
 - [GUIDE-VOICE-PLUGIN.md](GUIDE-VOICE-PLUGIN.md) — voice app developer guide
-- [Connector Guide](https://github.com/bssingh/vera/blob/main/connectors/README.md) — build your own connector
+- [Connector Guide](https://github.com/Sozenta-Inc/vera/blob/main/connectors/README.md) — build your own connector
