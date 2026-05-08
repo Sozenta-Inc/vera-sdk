@@ -87,7 +87,7 @@ This principal (`test`) has access to: `echo`, `llm-local`, `bedrock-claude`, `l
 
 | Connector | Type | Default | What it does |
 |---|---|---|---|
-| `bedrock-claude` | Proxy | **Yes** | Claude models via AWS Bedrock (Haiku 4.5, Sonnet 4.6, Opus) |
+| `bedrock-claude` | Proxy | **Yes** | Claude models via AWS Bedrock — pick per-request via `"model"` field: `haiku` (default, Haiku 4.5), `sonnet` (Sonnet 4.6), `opus` (Opus 4.7), or any full Bedrock inference profile ID |
 | `llm-local` | Proxy | | Qwen 3 0.6B via local Ollama |
 | `echo` | Wasm | | Returns input unchanged (testing) |
 | `moonshine` | Wasm | | Audio → transcript via Moonshine ONNX |
@@ -111,6 +111,43 @@ connector = "llm-local"
 ```rust
 // App calls the alias — operator controls which backend it maps to
 let resp = client.infer("claude", b"Hello").await?;
+```
+
+### Picking a Bedrock Claude model (SDK 0.2+)
+
+The `bedrock-claude` connector accepts a `"model"` field per request — friendly aliases (`haiku`, `sonnet`, `opus`) or full Bedrock inference profile IDs. The SDK exposes a typed helper:
+
+```rust
+use vera_client::{BedrockModel, VeraClient};
+
+let client = VeraClient::builder()
+    .url("https://vera.sozenta.ai")
+    .bearer(&token)
+    .build()?;
+
+// Cheap + fast (default)
+let r1 = client.infer_claude(BedrockModel::Haiku, "Summarize this report.").await?;
+// Higher quality
+let r2 = client.infer_claude(BedrockModel::Sonnet, "Draft the legal review.").await?;
+// Top-tier reasoning
+let r3 = client.infer_claude(BedrockModel::Opus, "Audit this architecture.").await?;
+
+// Or pass any Bedrock inference profile ID directly:
+let r4 = client.infer_claude_with(
+    "us.anthropic.claude-opus-4-5-20251101-v1:0",
+    "Hello",
+).await?;
+```
+
+If no `"model"` is supplied, the connector defaults to **Haiku 4.5**.
+
+### Verifying which build is running
+
+`/version` returns the build SHA + timestamp (no auth required). Useful when rolling out new images:
+
+```rust
+let v = client.version().await?;
+println!("running: {} @ {}", v.git_sha, v.build_time);
 ```
 
 ### Fallback chains

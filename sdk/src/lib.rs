@@ -30,6 +30,61 @@ use reqwest::{
 use serde::Deserialize;
 use tokio::sync::RwLock;
 
+/// Bedrock Claude model selector. Maps to the friendly aliases the
+/// `bedrock-claude` connector accepts in the request body's `"model"`
+/// field. To use a non-listed Bedrock inference profile, pass the full
+/// ID as a string instead via [`VeraClient::infer_claude_with`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BedrockModel {
+    /// Claude Haiku 4.5 — cheapest + fastest. The default if no model
+    /// is supplied.
+    Haiku,
+    /// Claude Sonnet 4.6 — balanced cost / quality.
+    Sonnet,
+    /// Claude Opus 4.7 — highest capability.
+    Opus,
+}
+
+impl BedrockModel {
+    /// Friendly alias understood by the connector.
+    #[must_use]
+    pub const fn alias(self) -> &'static str {
+        match self {
+            Self::Haiku => "haiku",
+            Self::Sonnet => "sonnet",
+            Self::Opus => "opus",
+        }
+    }
+
+    /// Bedrock inference profile ID (`us-east-2`).
+    #[must_use]
+    pub const fn inference_profile_id(self) -> &'static str {
+        match self {
+            Self::Haiku => "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+            Self::Sonnet => "us.anthropic.claude-sonnet-4-6",
+            Self::Opus => "us.anthropic.claude-opus-4-7",
+        }
+    }
+}
+
+/// Build identification returned by `GET /version`. Operators use this
+/// to verify which commit is running on a given Vera host.
+#[derive(Clone, Debug, Deserialize)]
+pub struct VersionInfo {
+    /// Binary name (`vera-hub`).
+    #[serde(default)]
+    pub name: String,
+    /// Crate version.
+    #[serde(default)]
+    pub version: String,
+    /// Git commit SHA captured at build time.
+    #[serde(default)]
+    pub git_sha: String,
+    /// Build timestamp (RFC3339 UTC).
+    #[serde(default)]
+    pub build_time: String,
+}
+
 /// Connector manifest returned by `GET /v1/models`.
 #[derive(Clone, Debug, Deserialize)]
 pub struct ModelInfo {
@@ -271,6 +326,61 @@ impl VeraClient {
     pub async fn infer(&self, connector: &str, body: &[u8]) -> Result<InferResponse, VeraError> {
         let url = format!("{}/v1/infer/{connector}", self.base_url);
         self.post_with_retry(&url, body).await
+    }
+
+    /// Convenience for the `bedrock-claude` connector: send a prompt to
+    /// the chosen Claude model on AWS Bedrock. Wraps the prompt into a
+    /// Messages-API body with the right `"model"` alias.
+    ///
+    /// # Errors
+    /// See [`VeraError`] variants.
+    pub async fn infer_claude(
+        &self,
+        model: BedrockModel,
+        prompt: &str,
+    ) -> Result<InferResponse, VeraError> {
+        self.infer_claude_with(model.alias(), prompt).await
+    }
+
+    /// Same as [`Self::infer_claude`] but accepts a raw `model`
+    /// string — either a friendly alias (`"haiku"`, `"sonnet"`,
+    /// `"opus"`) or a full Bedrock inference profile ID.
+    ///
+    /// # Errors
+    /// See [`VeraError`] variants.
+    pub async fn infer_claude_with(
+        &self,
+        model: &str,
+        prompt: &str,
+    ) -> Result<InferResponse, VeraError> {
+        let body = serde_json::json!({
+            "model": model,
+            "max_tokens": 1024,
+            "messages": [{"role": "user", "content": prompt}],
+        });
+        let bytes = serde_json::to_vec(&body)
+            .map_err(|e| VeraError::Config(format!("serialize claude body: {e}")))?;
+        self.infer("claude", &bytes).await
+    }
+
+    /// Fetch build identification from `GET /version`. No auth required.
+    /// Use this to confirm which commit is running on a given Vera host
+    /// — operators rely on this for rollout verification.
+    ///
+    /// # Errors
+    /// Network errors or non-2xx responses.
+    pub async fn version(&self) -> Result<VersionInfo, VeraError> {
+        let url = format!("{}/version", self.base_url);
+        let resp = self.http.get(&url).send().await?;
+        if !resp.status().is_success() {
+            return Err(VeraError::Server {
+                status: resp.status().as_u16(),
+                message: resp.text().await.unwrap_or_default(),
+            });
+        }
+        resp.json::<VersionInfo>()
+            .await
+            .map_err(|e| VeraError::Config(format!("parse /version: {e}")))
     }
 
     /// Call a plugin endpoint: `POST /v1/plugin/{plugin_id}`.
@@ -553,6 +663,35 @@ mod tests {
         assert_eq!(info.id, "moonshine");
         assert_eq!(info.capabilities.input, "audio");
         assert_eq!(info.transport.modes, vec!["ws", "post"]);
+    }
+
+    // SPEC: none (SDK — Bedrock model alias + profile ID coverage).
+    #[test]
+    fn bedrock_model_aliases_and_profiles() {
+        assert_eq!(BedrockModel::Haiku.alias(), "haiku");
+        assert_eq!(BedrockModel::Sonnet.alias(), "sonnet");
+        assert_eq!(BedrockModel::Opus.alias(), "opus");
+        assert_eq!(
+            BedrockModel::Haiku.inference_profile_id(),
+            "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+        );
+        assert_eq!(
+            BedrockModel::Sonnet.inference_profile_id(),
+            "us.anthropic.claude-sonnet-4-6"
+        );
+        assert_eq!(
+            BedrockModel::Opus.inference_profile_id(),
+            "us.anthropic.claude-opus-4-7"
+        );
+    }
+
+    // SPEC: none (SDK — VersionInfo parses from /version JSON).
+    #[test]
+    fn version_info_deserializes() {
+        let json = r#"{"name":"vera-hub","version":"0.0.0","git_sha":"abc123","build_time":"2026-05-08T05:00:00Z"}"#;
+        let v: VersionInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(v.name, "vera-hub");
+        assert_eq!(v.git_sha, "abc123");
     }
 
     // SPEC: none (SDK scaffolding — error display).
