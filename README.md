@@ -194,6 +194,10 @@ let ws_url = client.ws_url("moonshine");
 // Connect with tokio-tungstenite, send audio, receive transcripts
 ```
 
+Full setup + wire format + browser/Python examples for the Moonshine
+streaming endpoint on a local Vera: see
+[**GUIDE-STREAMING-LOCAL.md**](GUIDE-STREAMING-LOCAL.md).
+
 ## Discovery
 
 Auto-discover available models and their capabilities:
