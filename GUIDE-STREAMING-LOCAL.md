@@ -45,11 +45,27 @@ REMOTE_VERA_TOKEN=dummy docker compose -f docker-compose.gemma-voice-hybrid.yml 
 On first boot the sidecar downloads ~80 MB of Moonshine model weights
 to its container volume. Subsequent restarts skip the download.
 
-Grab the bearer token (the container prints three on first boot — one
-per vault mode). Use the `block` one for production-shaped traffic:
+Grab the bearer token. The container prints four on first boot — one
+per principal — and stores each in `/vera/data/demo-key*.txt`:
+
+| Principal | File | When to use |
+|---|---|---|
+| `app` (block mode) | `demo-key.txt` | External / production traffic that needs PII protection |
+| `app-mask` | `demo-key-mask.txt` | PII gets reversibly tokenized before reaching the model |
+| `app-trusted` | `demo-key-off.txt` | Vault off — pre-sanitized inputs only |
+| **`veya`** | **`demo-key-veya.txt`** | **Internal client apps (Veya). Vault off + high QoS budget — won't get throttled by demo-tier rate limits.** |
+
+For internal client apps (like Veya) calling Vera as a service-to-service
+backbone, use the `veya` bearer — it's exempt from the demo-tier QoS
+throttle (10k burst / 1k rps vs 30 burst / 0.5 rps default). The bearer
+is also exposed on the landing page `https://localhost:8443/` and the
+`/llms.txt` discovery doc for easy discovery during development.
 
 ```bash
-docker exec docker-vera-hub-1 cat /vera/data/demo-key.txt
+# pick the bearer for your use case
+KEY=$(docker exec docker-vera-hub-1 cat /vera/data/demo-key-veya.txt)   # internal app
+# or:
+KEY=$(docker exec docker-vera-hub-1 cat /vera/data/demo-key.txt)        # external/demo
 ```
 
 Smoke-test the WS endpoint is up before wiring the client:
