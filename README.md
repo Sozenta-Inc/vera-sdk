@@ -198,6 +198,24 @@ Full setup + wire format + browser/Python examples for the Moonshine
 streaming endpoint on a local Vera: see
 [**GUIDE-STREAMING-LOCAL.md**](GUIDE-STREAMING-LOCAL.md).
 
+## Search
+
+Vendor-neutral web search through Vera. Same bearer, swappable
+backends (Anthropic today, Perplexity / Brave / sovereign providers
+swappable later — your client doesn't change).
+
+```bash
+curl -X POST https://vera.sozenta.ai/v1/search \
+  -H "Authorization: Bearer $VERA_BEARER" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"What is the current ECB interest rate?"}'
+```
+
+Returns ranked results + an optional LLM-synthesized answer with
+citations. Full request/response schema, agent tool-calling pattern,
+error handling, and backend selection: see
+[**GUIDE-SEARCH.md**](GUIDE-SEARCH.md).
+
 ## Discovery
 
 Auto-discover available models and their capabilities:
