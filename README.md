@@ -216,6 +216,26 @@ citations. Full request/response schema, agent tool-calling pattern,
 error handling, and backend selection: see
 [**GUIDE-SEARCH.md**](GUIDE-SEARCH.md).
 
+## Image generation
+
+Generate and edit images through Stability AI on AWS Bedrock — same
+bearer, same audit chain, same vault/policy/QoS pipeline. SigV4 signed
+by the gateway; no AWS credentials client-side.
+
+```bash
+curl -X POST https://vera.sozenta.ai/v1/infer/stability-image \
+  -H "Authorization: Bearer $VERA_BEARER" \
+  -H "Content-Type: text/plain" \
+  -d 'a photorealistic red apple on a wooden table, soft window light' \
+  | jq -r '.images[0]' | base64 -d > apple.png
+```
+
+One connector, many models: pass `"model"` in the body to pick `core`
+(default), `ultra`, `sd3-5-large`, `inpaint`, `outpaint`, `upscale`,
+`remove-bg`, `style-transfer`, etc. Full per-model request shapes,
+edit examples, error codes, and agent tool-call pattern: see
+[**GUIDE-IMAGE.md**](GUIDE-IMAGE.md).
+
 ## Discovery
 
 Auto-discover available models and their capabilities:
