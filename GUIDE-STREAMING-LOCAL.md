@@ -53,11 +53,11 @@ per principal — and stores each in `/vera/data/demo-key*.txt`:
 | `app` (block mode) | `demo-key.txt` | External / production traffic that needs PII protection |
 | `app-mask` | `demo-key-mask.txt` | PII gets reversibly tokenized before reaching the model |
 | `app-trusted` | `demo-key-off.txt` | Vault off — pre-sanitized inputs only |
-| **`veya`** | **`demo-key-veya.txt`** | **Internal client apps (Veya). Vault off + high QoS budget — won't get throttled by demo-tier rate limits.** |
+| **`veya`** | **`demo-key-veya.txt`** | **Internal client apps (Veya). Vault off + a 20 rps QoS bucket — enough headroom for app + agent flows, capped to keep runaway loops from burning the backend budget.** |
 
 For internal client apps (like Veya) calling Vera as a service-to-service
-backbone, use the `veya` bearer — it's exempt from the demo-tier QoS
-throttle (10k burst / 1k rps vs 30 burst / 0.5 rps default). The bearer
+backbone, use the `veya` bearer — it gets a dedicated 20 rps bucket
+(burst 20) instead of the default demo-tier `30 burst / 0.5 rps`. The bearer
 is also exposed on the landing page `https://localhost:8443/` and the
 `/llms.txt` discovery doc for easy discovery during development.
 
