@@ -216,6 +216,25 @@ citations. Full request/response schema, agent tool-calling pattern,
 error handling, and backend selection: see
 [**GUIDE-SEARCH.md**](GUIDE-SEARCH.md).
 
+## MCP Server
+
+Vera exposes its capabilities to Claude Code, Cursor, Claude Desktop,
+and any MCP-compatible client through a single Streamable HTTP
+endpoint:
+
+```bash
+claude mcp add vera https://vera.sozenta.ai/mcp \
+  --header "Authorization: Bearer $VEYA_BEARER"
+```
+
+After install, your AI client sees `vera_scan`, `vera_search`,
+`vera_image`, `kb_search_<id>` (per registered KB), and `agent_<id>`
+(per agent with `expose_mcp = true`) as tools — filtered by the
+caller's ACL. Every `tools/call` runs through the same vault + audit
++ QoS pipeline as the REST surface. Full JSON-RPC schema, install
+instructions per client, and forward-compat notes:
+[**GUIDE-MCP.md**](GUIDE-MCP.md).
+
 ## RAG / Knowledge Bases
 
 Retrieval-augmented generation against your own documents — customer's
