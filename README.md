@@ -276,6 +276,34 @@ let ws_url = client.agent_ws_url("admin");
 | `assistant` | llm-local | echo, llm-local | General assistant (sample) |
 | `admin` | llm-local | admin-api | Manage Vera via natural language |
 
+### Managing agents (create / update / delete)
+
+Vera supports dynamic agents persisted in the host's data directory.
+Create them at runtime with `POST /v1/agents` (the `veya` principal
+has the required `agents:write` ACL by default):
+
+```bash
+curl -X POST https://vera.sozenta.ai/v1/agents \
+  -H "Authorization: Bearer $VEYA_BEARER" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "release-notes",
+    "display_name": "Release Notes Summarizer",
+    "llm": { "connector": "bedrock-claude" },
+    "tools": { "allowed": ["echo", "bedrock-claude"] },
+    "limits": { "max_iterations": 4 },
+    "prompt": { "system": "Summarize the changelog as 5 bullets." }
+  }'
+```
+
+Dynamic agents survive restart (redb-backed), hot-swap without a
+reload, and show up everywhere static agents do (`/v1/agents`,
+`/v1/services`, `/llms.txt`). Static agents (baked in via
+`agents/*.toml` in the image) are read-only via the API.
+
+Full request/response schema, validation rules, and patterns:
+[**GUIDE-AGENTS.md**](GUIDE-AGENTS.md).
+
 ## SDK reference
 
 ### `VeraClient::builder()`
