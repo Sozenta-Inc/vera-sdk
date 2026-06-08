@@ -216,6 +216,32 @@ citations. Full request/response schema, agent tool-calling pattern,
 error handling, and backend selection: see
 [**GUIDE-SEARCH.md**](GUIDE-SEARCH.md).
 
+## Agent bundles (.bot.tar.gz)
+
+Publish portable agent recipes — system prompt + config + (optional)
+RAG corpus — as a single gzipped tar. Same format Veya uses for local
+creation and file-based sharing. Anyone can build a bundle that Vera
+will install.
+
+```bash
+# Publish (idempotent on SHA256 — safe to run on every CI build)
+curl -X PUT https://vera.sozenta.ai/v1/agents/compliance/bundle \
+  -H "Authorization: Bearer $VEYA_BEARER" \
+  -H "Content-Type: application/gzip" \
+  --data-binary @compliance.bot.tar.gz
+
+# Anyone with a bearer can then invoke the published bot
+curl -X POST https://vera.sozenta.ai/v1/agent/compliance \
+  -H "Authorization: Bearer $BEARER" \
+  -d "your question here"
+```
+
+Format spec (public, third-party-implementable):
+[**FORMAT-bot-bundle.md**](FORMAT-bot-bundle.md). Usage guide with
+CRUD endpoints, ACL, idempotency semantics, CI publish examples, and
+the cycle 7.5 corpus-indexing roadmap:
+[**GUIDE-BUNDLES.md**](GUIDE-BUNDLES.md).
+
 ## MCP Server
 
 Vera exposes its capabilities to Claude Code, Cursor, Claude Desktop,
