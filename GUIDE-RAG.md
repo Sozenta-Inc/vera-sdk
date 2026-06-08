@@ -231,7 +231,16 @@ happens out-of-band; Vera does not proxy ingestion.** The implication:
 
 ## Cycle 6: alternative backends (`pgvector`, `sqlite-vec`)
 
-The same `KnowledgeBase` schema works against future backends:
+**Status:** schema reserved + dispatch wired; the connectors
+themselves are not yet shipped (separate cycles — each requires a
+Postgres or embedded vector client plus an embedding pipeline, real
+subsystems on their own). Registering a KB against one of these names
+**succeeds**; calling it returns a clear "not yet implemented" error
+rather than silently no-op'ing.
+
+The same `KnowledgeBase` schema works against the upcoming backends —
+forward-declare your KBs today so callers can write code against the
+final wire shape:
 
 ```ts
 // pgvector — customer runs Postgres in their VPC
@@ -243,8 +252,32 @@ The same `KnowledgeBase` schema works against future backends:
   "backend_id": "/vera/data/kbs/dev-docs.sqlite", "region": "" }
 ```
 
-When those connectors land in cycle 6, the `kb-search` agent and the
-portal demo work unchanged. The vector store backend is pluggable.
+What the dispatch layer does *today*:
+
+- `POST /v1/knowledge_bases` accepts these backends and persists the
+  record (validation pass — they're in `RESERVED_BACKENDS`)
+- `GET /v1/knowledge_bases` returns them in the catalog
+- `/llms.txt` and `/v1/services` list them
+- MCP `tools/list` surfaces `kb_search_<id>` for them **if the caller's
+  ACL grants the backend name** (veya has `pgvector` and `sqlite-vec`
+  in its connectors list by default)
+- MCP `tools/call` on those tools returns:
+  `{"error":{"code":-32603,"message":"backend 'pgvector' is reserved but not yet implemented (cycle 6+); register against 'bedrock-kb' for now"}}`
+
+When the connectors land:
+
+- **`pgvector`**: a host-native module (not wasm — Postgres clients
+  don't compile to wasm32-wasip2 cleanly) that takes a query, calls
+  Bedrock Titan Embeddings to embed, runs SQL against the customer's
+  pgvector table with cosine distance. Customer pre-creates the table
+  and populates it themselves (no Vera ingestion).
+- **`sqlite-vec`**: an embedded vector store using sqlite-vec, with a
+  local embedding model (likely Bedrock Titan or a small ONNX model).
+  For laptop / airgap demos. Vera handles ingestion in this case.
+
+Both work against the same `kb-search` agent — agents see the
+`bedrock-kb`-style request body; the dispatch layer routes by the KB's
+`backend` field.
 
 ## Quickstart
 
