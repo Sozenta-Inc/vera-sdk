@@ -216,6 +216,28 @@ citations. Full request/response schema, agent tool-calling pattern,
 error handling, and backend selection: see
 [**GUIDE-SEARCH.md**](GUIDE-SEARCH.md).
 
+## RAG / Knowledge Bases
+
+Retrieval-augmented generation against your own documents — customer's
+docs and embeddings live in their own AWS account (Bedrock Knowledge
+Bases by default), Vera signs the retrieval call and audits every
+chunk that comes back.
+
+```bash
+# Full RAG — retrieve + synthesize + cite
+curl -X POST https://vera.sozenta.ai/v1/agent/kb-search \
+  -H "Authorization: Bearer $VEYA_BEARER" \
+  -H "Content-Type: text/plain" \
+  --data-raw 'Question: What is our SOC2 audit cadence?
+Knowledge base id: kb-abcdef0123456789'
+```
+
+KB management via `POST /v1/knowledge_bases` (requires `kb:write`),
+raw retrieve via `POST /v1/infer/bedrock-kb`, full RAG via the
+`kb-search` agent recipe. All ACL-gated, all audited. Full setup,
+backend choice (Aurora pgvector / OpenSearch / pgvector / sqlite-vec),
+and ingestion notes: see [**GUIDE-RAG.md**](GUIDE-RAG.md).
+
 ## Image generation
 
 Generate and edit images through Stability AI on AWS Bedrock — same
