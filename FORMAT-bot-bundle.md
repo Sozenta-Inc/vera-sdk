@@ -60,6 +60,7 @@ The folder name IS the bot id (kebab-case, `[a-zA-Z0-9_-]`, ≤80 chars).
   "welcomeMessageFile": "prompts/welcome.md",    // optional, chat mode
   "suggestedQuestionsFile": "prompts/suggested.json",  // optional
   "exposeMcp": false,                            // surface as agent_<id> in Vera MCP
+  "distribution": "open",                        // "open" (default) | "sealed" — sealed = invoke-only, download refused
   "exportedAt": "2026-06-08T15:42:00Z"           // provenance, display-only
 }
 ```
@@ -78,6 +79,7 @@ The folder name IS the bot id (kebab-case, `[a-zA-Z0-9_-]`, ≤80 chars).
 | `welcomeMessageFile` | optional | Path inside bot folder. Chat mode only. |
 | `suggestedQuestionsFile` | optional | Path to a JSON array of strings. |
 | `exposeMcp` | optional | When true + published to Vera, surface as `agent_<slug>` MCP tool. |
+| `distribution` | optional | `"open"` (default) or `"sealed"`. Sealed bundles are write-only artifacts: the host runs the agent but refuses `GET …/bundle` for **all** principals — confidential corpora never leave. Any other value is rejected with `400` (a typo must not silently expose a corpus). Hosts surface `bundle_sealed` in agent listings. |
 | `exportedAt` | optional | ISO timestamp written by the exporter. Display-only. |
 
 ---

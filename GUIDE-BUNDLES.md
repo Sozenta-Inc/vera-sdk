@@ -38,6 +38,17 @@ curl -X DELETE https://vera.sozenta.ai/v1/agents/compliance/bundle \
 Same ACL as cycle 1's agent CRUD. No new permission name. The veya
 principal has `agents:write` by default; demo principals don't.
 
+## Sealed bundles (confidential corpora)
+
+Add `"distribution": "sealed"` to `bot.json` and the published bundle
+becomes a **write-only artifact**: everyone with access can still
+*invoke* the agent, but `GET /v1/agents/{id}/bundle` returns
+`403 {"error":"sealed"}` for all principals — publisher included. Use
+it for company-wide RAG agents whose documents must answer questions
+without ever being extractable. Keep your source of truth outside Vera;
+re-publishing (PUT) and deleting still work. Listings show
+`"bundle_sealed": true`. See [GUIDE-HOSTED-AGENTS.md §5](GUIDE-HOSTED-AGENTS.md).
+
 ## Build a bundle (anyone can)
 
 The format is documented in [FORMAT-bot-bundle.md](FORMAT-bot-bundle.md).
