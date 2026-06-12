@@ -63,7 +63,7 @@ self-signed (`curl -k` / trust-on-first-use).
 
 | Intent | Call |
 |---|---|
-| **List installed models** | `GET /ollama/api/tags` → `{"models":[{name, size, …}]}` — live; whatever is pulled appears immediately |
+| **List installed models** | `GET /v1/models` (OpenAI shape — proxied to Ollama, so it IS the live pulled-model list) or `GET /ollama/api/tags` for sizes/digests |
 | **Chat** | `POST /v1/chat/completions` (OpenAI shape) with `"model": "<name from tags>"` |
 | Embeddings | `POST /v1/embeddings` |
 | **Transcribe (ASR)** | `POST /v1/audio/inference` — multipart `file=@audio.wav` → whisper.cpp medium |
@@ -72,10 +72,12 @@ self-signed (`curl -k` / trust-on-first-use).
 | Ops console | `GET /admin/console` (paste the veya key once) |
 
 Notes:
-- `GET /v1/models` returns Vera's **connector** inventory
-  (`echo`, `passthrough`, `ollama`), *not* the Ollama model list — use
-  `/ollama/api/tags` for the picker. (A unified merged list is a
-  parked roadmap item.)
+- The metal config sets `[server] models_from_proxy = true` (proxy-role
+  discovery): `GET /v1/models` forwards to Ollama, so clients use the
+  plain OpenAI convention. Vera's connector inventory is an admin
+  concern (visible in the ops console), never the client model list.
+  Provider-role deployments (e.g. prod with the bedrock-claude
+  translator) keep the default `false` and list Vera's own surface.
 - The passthrough is buffered: a multi-GB `pull` returns on completion
   rather than streaming progress — fire it, poll tags.
 - Vault runs on every body: a request containing e.g. an SSN is blocked
