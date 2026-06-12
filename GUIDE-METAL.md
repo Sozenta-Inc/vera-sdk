@@ -18,10 +18,16 @@ Veya ──https://localhost:8443──▶ Vera ──▶ 127.0.0.1:11434  Ollam
 
 ## Install
 
+**From the DMG (no toolchain):** mount `VeraHub-metal-<sha>-<arch>.dmg`
+and run `./VeraHub/install.sh` — prebuilt binary, connectors, vera-ctl,
+and the installer are bundled. Operators produce the DMG with
+`make metal-dmg` (lands in `dist/`).
+
+**From source:**
 ```bash
 git clone git@github.com:Sozenta-Inc/vera.git && cd vera
 make metal          # build → ~/.vera → service unit → started
-make metal-smoke    # 9-check verification
+make metal-smoke    # verification (14 checks)
 ```
 
 Idempotent: re-running upgrades the binary + service units and
