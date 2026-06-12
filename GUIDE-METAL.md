@@ -29,10 +29,13 @@ Idempotent: re-running upgrades the binary + service units and
 any operator-edited config.
 
 Prereqs: `rustup` (until prebuilt binaries ship), `ollama serve`
-running, and optionally `brew install whisper-cpp` for ASR — the
-installer detects whisper-server, downloads the medium model (~1.5 GB,
-one-time), and adds its own service unit. Without it, `/v1/audio/*`
-502s cleanly and everything else works.
+running, and optionally whisper-server for ASR. Dev installs:
+`vera-ctl asr-setup` (brews whisper-cpp + unit + default model) — a
+client may spawn it after `409 runtime_missing` from the install API.
+App-bundle distributions ship whisper-server inside the app and never
+need it. Without ASR, `/v1/audio/*` 502s cleanly; everything else works.
+ASR catalog is curated: **whisper-medium (default) and whisper-large-v3
+only** — smaller variants are a quality cut we don't ship.
 
 ## Lifecycle
 
@@ -67,8 +70,9 @@ self-signed (`curl -k` / trust-on-first-use).
 | **Chat** | `POST /v1/chat/completions` (OpenAI shape) with `"model": "<name from tags>"` |
 | Embeddings | `POST /v1/embeddings` |
 | **Transcribe (ASR)** | `POST /v1/audio/inference` — multipart `file=@audio.wav` → whisper.cpp medium |
-| **Install a model** | `POST /ollama/api/pull {"model":"llama3.2"}` — then poll `/ollama/api/tags` for arrival |
-| Remove a model | `DELETE /ollama/api/delete {"model":"…"}` |
+| **Unified model catalog** | `GET /admin/models` — curated ASR rows (installed/active) + Ollama's installed set + `asr_runtime_present`, one call for the whole picker (`admin:read`) |
+| **Install a model** | `POST /admin/models/install {"backend":"llm"\|"asr","model":"…"}` (`admin:write`, audited). ASR: curated catalog only — `whisper-medium` (default), `whisper-large-v3`; sha-pinned download + activation symlink swap + service bounce. LLM: forwarded to Ollama pull (any registry name). Raw `/ollama/api/pull` also works |
+| Remove a model | `DELETE /admin/models/{backend}/{name}` — active ASR model refuses deletion (activate another first) |
 | Ops console | `GET /admin/console` (paste the veya key once) |
 
 Notes:
