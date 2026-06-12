@@ -497,4 +497,6 @@ sudo systemctl start vera-hub
 - [Vera Gateway](https://github.com/Sozenta-Inc/vera) — the gateway itself
 - [Architecture](https://github.com/Sozenta-Inc/vera/blob/main/docs/ARCHITECTURE.md) — pipeline, streaming, discovery, agents
 - [GUIDE-VOICE-PLUGIN.md](GUIDE-VOICE-PLUGIN.md) — voice app developer guide
+- [GUIDE-METAL.md](GUIDE-METAL.md) — native edge Vera (no Docker): launchd/systemd, Ollama + Whisper in proxy mode, model lifecycle through Vera
+- [GUIDE-TOKEN-PROVISIONING.md](GUIDE-TOKEN-PROVISIONING.md) — temporary token endpoint + Veya client migration
 - [Connector Guide](https://github.com/Sozenta-Inc/vera/blob/main/connectors/README.md) — build your own connector

@@ -1,0 +1,101 @@
+# Guide — Metal Edge Vera (native, no Docker)
+
+**Audience:** the Veya app team + anyone deploying Vera as an OS-native
+service on a workstation or edge box.
+
+The `metal-local` shape runs Vera as a **single Rust binary under
+launchd (macOS) or systemd (Linux)** — no Docker — fronting two
+host-local model servers in **proxy mode**: clients talk only to Vera,
+and every request passes auth → policy ACL → PII vault scan → QoS →
+hash-chained audit before any model sees a byte.
+
+```
+Veya ──https://localhost:8443──▶ Vera ──▶ 127.0.0.1:11434  Ollama   (chat, any pulled model)
+        (auth/ACL/vault/QoS/audit)  └──▶ 127.0.0.1:8090   whisper  (ASR, whisper.cpp medium)
+```
+
+---
+
+## Install
+
+```bash
+git clone git@github.com:Sozenta-Inc/vera.git && cd vera
+make metal          # build → ~/.vera → service unit → started
+make metal-smoke    # 9-check verification
+```
+
+Idempotent: re-running upgrades the binary + service units and
+**preserves** `~/.vera/data` (keystore, audit chain, hub identity) and
+any operator-edited config.
+
+Prereqs: `rustup` (until prebuilt binaries ship), `ollama serve`
+running, and optionally `brew install whisper-cpp` for ASR — the
+installer detects whisper-server, downloads the medium model (~1.5 GB,
+one-time), and adds its own service unit. Without it, `/v1/audio/*`
+502s cleanly and everything else works.
+
+## Lifecycle
+
+```bash
+vera-ctl status     # service state + vera/ollama/whisper probes + hub_id
+vera-ctl restart    # stop + start (data dir untouched)
+vera-ctl update     # git pull → rebuild → atomic binary swap → restart → health check
+vera-ctl logs       # tail the structured JSONL log
+```
+
+`~/.vera/bin/vera-ctl` — add `~/.vera/bin` to PATH. The data dir is
+single-writer (keystore + audit are locked redb files): lifecycle is
+always stop-then-start, never two hubs on one data dir.
+
+## Auth
+
+Two keys are minted at install into `~/.vera/data/`:
+
+| File | Principal | ACL |
+|---|---|---|
+| `key-veya.txt` | `veya` | echo, passthrough (all proxied model traffic), `admin:read`, `admin:write` |
+| `key-demo.txt` | `demo` | echo only — exists to prove the ACL gate |
+
+Every endpoint requires `Authorization: Bearer <key>`. TLS is
+self-signed (`curl -k` / trust-on-first-use).
+
+## The client contract (what Veya calls)
+
+| Intent | Call |
+|---|---|
+| **List installed models** | `GET /ollama/api/tags` → `{"models":[{name, size, …}]}` — live; whatever is pulled appears immediately |
+| **Chat** | `POST /v1/chat/completions` (OpenAI shape) with `"model": "<name from tags>"` |
+| Embeddings | `POST /v1/embeddings` |
+| **Transcribe (ASR)** | `POST /v1/audio/inference` — multipart `file=@audio.wav` → whisper.cpp medium |
+| **Install a model** | `POST /ollama/api/pull {"model":"llama3.2"}` — then poll `/ollama/api/tags` for arrival |
+| Remove a model | `DELETE /ollama/api/delete {"model":"…"}` |
+| Ops console | `GET /admin/console` (paste the veya key once) |
+
+Notes:
+- `GET /v1/models` returns Vera's **connector** inventory
+  (`echo`, `passthrough`, `ollama`), *not* the Ollama model list — use
+  `/ollama/api/tags` for the picker. (A unified merged list is a
+  parked roadmap item.)
+- The passthrough is buffered: a multi-GB `pull` returns on completion
+  rather than streaming progress — fire it, poll tags.
+- Vault runs on every body: a request containing e.g. an SSN is blocked
+  with `422` **before** it reaches Ollama or whisper.
+
+## Model-support policy
+
+- **LLMs (GGUF via Ollama): any model, dynamically.** Ollama normalizes
+  the API; `ollama pull` (or `/ollama/api/pull` through Vera) is the
+  whole story. No Vera config change per model.
+- **ASR (ONNX/GGML): curated + preseeded — never "any file".** ONNX is
+  a file format, not an API contract; each ASR model needs an execution
+  recipe (tokenizer, sample rate, chunking). Shipped: whisper.cpp
+  `medium`. Additional sizes/models land as curated additions.
+
+## Port map (all loopback)
+
+| Port | Service | Exposed to clients? |
+|---|---|---|
+| 8443 | Vera ingress (TLS) | **yes — the only front door** |
+| 9090 | Vera admin (loopback) | host-local only |
+| 11434 | Ollama | no — reached via Vera |
+| 8090 | whisper-server | no — reached via Vera |
