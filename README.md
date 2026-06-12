@@ -501,5 +501,4 @@ sudo systemctl start vera-hub
 - [GUIDE-HOSTED-MODELS.md](GUIDE-HOSTED-MODELS.md) — provider-role models: discovery, /v1/infer, aliases, what the pipeline guarantees
 - [GUIDE-PROXY.md](GUIDE-PROXY.md) — proxy-role: front Ollama/llama.cpp/SaaS APIs with auth + ACL + vault + audit; models_from_proxy discovery
 - [GUIDE-METAL.md](GUIDE-METAL.md) — native edge Vera (no Docker): launchd/systemd, Ollama + Whisper in proxy mode, model lifecycle through Vera
-- [GUIDE-TOKEN-PROVISIONING.md](GUIDE-TOKEN-PROVISIONING.md) — temporary token endpoint + Veya client migration
 - [Connector Guide](https://github.com/Sozenta-Inc/vera/blob/main/connectors/README.md) — build your own connector
