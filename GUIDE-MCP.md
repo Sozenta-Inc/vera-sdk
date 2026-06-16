@@ -224,6 +224,49 @@ notification channel.)
   [GUIDE-AGENTS.md](GUIDE-AGENTS.md)
 - **MCP-as-management-surface** — same reason
 
+## Federating upstream MCP servers (the gateway)
+
+Vera is also an **MCP gateway**: register an external MCP server and its
+tools surface inside Vera's own `/mcp` — ACL-gated, audited, egress-checked
+— so a customer adds a custom capability (a 3D-printer server, a CRM MCP,
+an internal-API MCP) **without Vera reimplementing it**. One governed
+endpoint, many capabilities, filtered per principal.
+
+Register in config:
+
+```toml
+[[mcp_upstreams]]
+id   = "printer"                    # tools surface as printer.slice, printer.send, …
+url  = "http://127.0.0.1:7777/mcp"  # host must be in [egress] allow_hosts
+acl  = "printer"                    # principals need this ACL to see/call them
+auth = "none"                       # or "bearer" + token = "$PRINTER_MCP_TOKEN"
+```
+
+…or live, with **no hub restart** (what the ext installer uses):
+
+```
+GET    /admin/mcp/upstreams         # list (token redacted)
+POST   /admin/mcp/upstreams         # { id, url, acl, auth, enabled } — upsert
+DELETE /admin/mcp/upstreams/{id}    # remove
+```
+
+How it behaves:
+
+- **`tools/list`** fetches each enabled upstream's tools, prefixes them
+  `<id>.<tool>`, and merges them in — filtered by the caller's ACL. A down
+  upstream is **skipped, never fatal**.
+- **`tools/call`** on a `<id>.<tool>` name forwards the JSON-RPC to the
+  upstream (optional bearer) and audits the dispatch — it bypasses the wasm
+  pipeline, so it's logged explicitly.
+- The upstream server is **language-agnostic** (Rust/Python/TS) — Vera
+  speaks to it over HTTP and governs it identically.
+
+The upstream server itself is shipped as a **vera-metal extension** (see
+[GUIDE-METAL.md](GUIDE-METAL.md) → Extensions): `vera-ctl ext install <id>`
+fetches a signed artifact, supervises it, and registers it via the admin
+endpoint above. The reference ext is a 3D-printer server (slice/send/status,
+FlashForge + Moonraker backends, LAN auto-discovery).
+
 ## Forward path
 
 The same `/mcp` endpoint will pick up new tools automatically as:

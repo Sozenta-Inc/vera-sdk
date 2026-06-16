@@ -56,6 +56,39 @@ vera-ctl logs       # tail the structured JSONL log
 single-writer (keystore + audit are locked redb files): lifecycle is
 always stop-then-start, never two hubs on one data dir.
 
+## Extensions (federated MCP tool servers)
+
+An **ext** is a local MCP server that vera-metal supervises and federates
+into its governed `/mcp` — the way you add a custom capability (a 3D
+printer, a CRM, an internal API) without modifying Vera. It reuses the
+whole sidecar lifecycle: signed channel artifact, sha256 + minisign
+verify, supervised service, register live (no hub restart).
+
+```bash
+vera-ctl ext list                 # installed exts + server up/down
+vera-ctl ext install printer      # fetch (channel or tarball) → verify → supervise → federate
+vera-ctl ext update printer       # re-install the channel artifact
+vera-ctl ext uninstall printer    # deregister + stop + remove (keeps data/ unless --purge)
+```
+
+Install lays the ext under `~/.vera/ext/<id>/`, runs it as a per-user
+service, waits for its `/healthz`, then registers it with the hub via
+`POST /admin/mcp/upstreams` — so its tools appear in `/mcp` as
+`<id>.<tool>`, ACL-gated (a principal needs the ext's `acl`) and audited.
+See [GUIDE-MCP.md](GUIDE-MCP.md) → "Federating upstream MCP servers".
+
+The reference ext is **`printer`** — a 3D-printer MCP server
+(slice/send/status) with FlashForge (TCP 8899) + Moonraker (Klipper REST)
+backends and **LAN auto-discovery** (installs, finds your printer, no IP
+to type).
+
+> **macOS:** a launchd-supervised ext that reaches LAN devices needs the
+> **Local Network** grant — System Settings → Privacy & Security → Local
+> Network → enable the ext binary. Without it, discovery + device control
+> silently fail (the binary works fine from a Terminal/SSH context, which
+> already has the grant). `vera-ctl ext install` prints this and opens the
+> pane when a GUI session is present. Linux/systemd has no equivalent block.
+
 ## Auth
 
 Two keys are minted at install into `~/.vera/data/`:
