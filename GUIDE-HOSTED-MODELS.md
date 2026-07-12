@@ -64,40 +64,53 @@ curl -X POST https://<your-vera>/v1/infer/claude \
 
 A hosted **text + vision → text** reasoning model (1M-token context).
 Vera holds the Meta API key server-side and injects it per call, so —
-like every hosted model — clients carry only their Vera bearer. Nothing
-to configure client-side: it appears in `/v1/models` on its own
-(`id: "meta"`, `model: "muse-spark-1.1"`) and is called by the
-`muse-spark-1.1` alias (or the `meta` connector id).
+like every hosted model — clients carry only their Vera bearer. It
+appears in `/v1/models` on its own (`id: "meta"`, `model:
+"muse-spark-1.1"`) and is called by the `muse-spark-1.1` alias (or the
+`meta` connector id).
+
+**Same wire format as Claude.** Spark's connector speaks **Anthropic
+Messages** — top-level `system`, `max_tokens`, `messages` in; content
+blocks out — so a client already calling `claude` reaches Spark by
+**changing only the model name**. No OpenAI-shape translation.
 
 ```bash
 curl -X POST https://<your-vera>/v1/infer/muse-spark-1.1 \
   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
   -d '{ "model": "muse-spark-1.1", "max_tokens": 3000,
+        "system": "You are a terse assistant.",
         "messages": [{"role":"user","content":"What is 17 × 23? Reply with only the number."}] }'
 ```
 
-- **Reasoning model — send a generous `max_tokens`.** Spark draws
-  *reasoning* tokens from the same budget as the answer, so a small
-  `max_tokens` can be consumed entirely by hidden reasoning and return
-  **empty** content with `finish_reason: "length"` — no error. A few
-  thousand is a safe floor for short answers.
-- **Streaming (recommended):** send `"stream": true`. The model can
-  pause for seconds emitting hidden reasoning before its first visible
-  token; the SSE is forwarded chunk-by-chunk and Vera's keep-alive
-  holds the connection open through the pause.
-- **Vision (image → text):** pass an image part in the message content
-  and Spark answers in text. It does **not** generate images — for that
-  use `stability-image` (text → image).
+The response is a `content` array. As a **reasoning** model, Spark
+returns its reasoning as an encrypted `redacted_thinking` block next to
+the `text` block — **read `text`, ignore `redacted_thinking`** (Claude
+parsers already do).
+
+- **Send a generous `max_tokens`.** Reasoning tokens draw from the same
+  budget, so a small `max_tokens` can be consumed entirely by reasoning,
+  leaving **no `text` block** (`stop_reason: "max_tokens"`) with no
+  error. A few thousand is a safe floor for short answers.
+- **Streaming (recommended):** send `"stream": true` for Anthropic SSE
+  (`message_start` / `content_block_delta` / …). The model can pause for
+  seconds emitting reasoning before the first visible token; Vera's
+  keep-alive holds the connection open through it.
+- **Prompt caching:** Spark honors Anthropic `cache_control` breakpoints
+  — a repeated large prefix is read from cache (large input-token
+  savings). Vera can also place breakpoints server-side via
+  `[[cache.provider_injection]]`, same as `bedrock-claude`.
+- **Vision (image → text):** pass an Anthropic image block; Spark answers
+  in text. It does **not** generate images — for that use
+  `stability-image` (text → image).
 
 ```bash
 curl -X POST https://<your-vera>/v1/infer/muse-spark-1.1 \
   -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
   -d '{ "model":"muse-spark-1.1", "max_tokens":3000, "messages":[{"role":"user","content":[
         {"type":"text","text":"What is in this image?"},
-        {"type":"image_url","image_url":{"url":"data:image/png;base64,<...>"}}]}] }'
+        {"type":"image","source":{"type":"base64","media_type":"image/png","data":"<...>"}}]}] }'
 ```
 
-Body is OpenAI Chat Completions shape (Anthropic Messages also accepted).
 Discovery advertises `modalities: ["text-to-text","image-to-text"]`,
 `input: "text+image"`, `output: "text"`.
 
