@@ -4,6 +4,11 @@ Generate, edit, and enhance images through Vera. Powered by Stability
 AI on AWS Bedrock by default; the wire format is connector-shaped so
 you can swap providers later without touching client code.
 
+> **Generation vs. understanding.** This guide is **text → image**
+> (make a picture). For the reverse — **image → text** (read/describe a
+> picture) — use a vision model such as Meta Muse Spark 1.1; see
+> [GUIDE-HOSTED-MODELS.md](GUIDE-HOSTED-MODELS.md).
+
 Companion to [GUIDE-SEARCH.md](GUIDE-SEARCH.md),
 [GUIDE-VOICE-PLUGIN.md](GUIDE-VOICE-PLUGIN.md), and
 [GUIDE-STREAMING-LOCAL.md](GUIDE-STREAMING-LOCAL.md).

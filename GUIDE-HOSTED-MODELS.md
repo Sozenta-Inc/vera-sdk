@@ -10,10 +10,12 @@ and how to invoke things.
 | **Proxy** ([GUIDE-PROXY.md](GUIDE-PROXY.md)) | An upstream (Ollama, Anthropic…) | the upstream's live model list (`models_from_proxy = true`) | Metal/edge Vera |
 
 In provider role, every model call passes the full pipeline —
-authenticate → policy ACL → PII vault → QoS → dispatch → audit — and
-the connector runs **sandboxed in wasm** with credentials held by the
-host (SigV4 signing happens outside the sandbox; the connector never
-sees keys).
+authenticate → policy ACL → PII vault → QoS → dispatch → audit. Most
+connectors run **sandboxed in wasm** (SigV4 signing happens outside the
+sandbox; the connector never sees keys); a few are **host-side proxy
+forwards** to an OpenAI-compatible upstream (e.g. Meta Muse Spark 1.1),
+with the upstream API key injected host-side. Either way credentials
+stay on the host and never reach the client.
 
 ---
 
@@ -57,6 +59,47 @@ curl -X POST https://<your-vera>/v1/infer/claude \
   `bedrock-claude`); apps decouple from backend names.
 - Tool use: pass Anthropic-style `tools`; the response carries
   `tool_use` blocks for your client loop.
+
+### Meta Muse Spark 1.1 — `POST /v1/infer/muse-spark-1.1`
+
+A hosted **text + vision → text** reasoning model (1M-token context).
+Vera holds the Meta API key server-side and injects it per call, so —
+like every hosted model — clients carry only their Vera bearer. Nothing
+to configure client-side: it appears in `/v1/models` on its own
+(`id: "meta"`, `model: "muse-spark-1.1"`) and is called by the
+`muse-spark-1.1` alias (or the `meta` connector id).
+
+```bash
+curl -X POST https://<your-vera>/v1/infer/muse-spark-1.1 \
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{ "model": "muse-spark-1.1", "max_tokens": 3000,
+        "messages": [{"role":"user","content":"What is 17 × 23? Reply with only the number."}] }'
+```
+
+- **Reasoning model — send a generous `max_tokens`.** Spark draws
+  *reasoning* tokens from the same budget as the answer, so a small
+  `max_tokens` can be consumed entirely by hidden reasoning and return
+  **empty** content with `finish_reason: "length"` — no error. A few
+  thousand is a safe floor for short answers.
+- **Streaming (recommended):** send `"stream": true`. The model can
+  pause for seconds emitting hidden reasoning before its first visible
+  token; the SSE is forwarded chunk-by-chunk and Vera's keep-alive
+  holds the connection open through the pause.
+- **Vision (image → text):** pass an image part in the message content
+  and Spark answers in text. It does **not** generate images — for that
+  use `stability-image` (text → image).
+
+```bash
+curl -X POST https://<your-vera>/v1/infer/muse-spark-1.1 \
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{ "model":"muse-spark-1.1", "max_tokens":3000, "messages":[{"role":"user","content":[
+        {"type":"text","text":"What is in this image?"},
+        {"type":"image_url","image_url":{"url":"data:image/png;base64,<...>"}}]}] }'
+```
+
+Body is OpenAI Chat Completions shape (Anthropic Messages also accepted).
+Discovery advertises `modalities: ["text-to-text","image-to-text"]`,
+`input: "text+image"`, `output: "text"`.
 
 ### Image models — `POST /v1/infer/stability-image`
 
