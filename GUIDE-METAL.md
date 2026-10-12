@@ -48,9 +48,21 @@ only** — smaller variants are a quality cut we don't ship.
 ```bash
 vera-ctl status     # service state + vera/ollama/whisper probes + hub_id
 vera-ctl restart    # stop + start (data dir untouched)
-vera-ctl update     # git pull → rebuild → atomic binary swap → restart → health check
+vera-ctl update     # channel manifest → download → verify → bundled installer → health check (rollback on failure)
 vera-ctl logs       # tail the structured JSONL log
 ```
+
+**What a channel download is verified against.** Every metal download
+(`install.sh`, `vera-ctl update`, `dep install`, `ext install`) is checked
+against the manifest's **sha256, which is required** — a manifest without
+one, or a file that cannot be hashed, is refused. A minisign signature is
+verified against the pinned channel key **only when the manifest carries
+one, and no channel manifest does today** (`signature: null`), so every
+install warns that provenance is unverified: sha256 proves the bytes match
+the manifest served over HTTPS, not who wrote it. Set
+`VERA_REQUIRE_SIGNATURE=1` to refuse anything whose signature was not
+verified. Windows (`install.ps1`, `vera-ctl.ps1 update`) follows the same
+contract.
 
 `~/.vera/bin/vera-ctl` — add `~/.vera/bin` to PATH. The data dir is
 single-writer (keystore + audit are locked redb files): lifecycle is
@@ -61,8 +73,9 @@ always stop-then-start, never two hubs on one data dir.
 An **ext** is a local MCP server that vera-metal supervises and federates
 into its governed `/mcp` — the way you add a custom capability (a 3D
 printer, a CRM, an internal API) without modifying Vera. It reuses the
-whole sidecar lifecycle: signed channel artifact, sha256 + minisign
-verify, supervised service, register live (no hub restart).
+whole sidecar lifecycle: channel artifact, the same verification as the
+hub (sha256 required; a signature only when the manifest carries one —
+see Lifecycle above), supervised service, register live (no hub restart).
 
 ```bash
 vera-ctl ext list                 # installed exts + server up/down
