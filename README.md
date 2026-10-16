@@ -89,6 +89,8 @@ This principal (`test`) has access to: `echo`, `llm-local`, `bedrock-claude`, `l
 |---|---|---|---|
 | `bedrock-claude` | Proxy | **Yes** | Claude models via AWS Bedrock — pick per-request via `"model"` field: `haiku` (default, Haiku 4.5), `sonnet` (Sonnet 4.6), `opus` (Opus 4.7), or any full Bedrock inference profile ID |
 | `meta` | Proxy | | Meta Muse Spark 1.1 — text + vision → text reasoning model (1M ctx); Meta key injected host-side. Call via the `muse-spark-1.1` alias. See [GUIDE-HOSTED-MODELS](GUIDE-HOSTED-MODELS.md) |
+| `meta-spark-13` | Proxy | | Meta Muse Spark 1.3 — text + image + video + PDF → text reasoning model (1,048,576 ctx); same host-side key as `meta`. Call via the `muse-spark-1.3` alias. **No audio** — unsupported on this checkpoint, see [GUIDE-HOSTED-MODELS](GUIDE-HOSTED-MODELS.md) |
+| `meta-image` | Proxy | | Meta Muse Image 1.0 — text → image; OpenAI-compatible images endpoint (buffered, no streaming), returns base64 `data[0].b64_json`. Call via the `muse-image-1.0` alias. See [GUIDE-HOSTED-MODELS](GUIDE-HOSTED-MODELS.md) |
 | `llm-local` | Proxy | | Qwen 3 0.6B via local Ollama |
 | `echo` | Wasm | | Returns input unchanged (testing) |
 | `moonshine` | Wasm | | Audio → transcript via Moonshine ONNX |

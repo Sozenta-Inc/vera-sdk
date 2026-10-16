@@ -114,6 +114,68 @@ curl -X POST https://<your-vera>/v1/infer/muse-spark-1.1 \
 Discovery advertises `modalities: ["text-to-text","image-to-text"]`,
 `input: "text+image"`, `output: "text"`.
 
+### Meta Muse Spark 1.3 — `POST /v1/infer/muse-spark-1.3`
+
+The newer Spark checkpoint, alongside 1.1 (both are live; 1.1 is
+unchanged). Same server-held key, same **Anthropic Messages** wire
+format, same reasoning-model caveats as 1.1 above — generous
+`max_tokens`, `redacted_thinking` next to `text`, streaming
+recommended. It appears in `/v1/models` as `id: "meta-spark-13"`,
+`model: "muse-spark-1.3"`.
+
+```bash
+curl -X POST https://<your-vera>/v1/infer/muse-spark-1.3 \
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{ "model": "muse-spark-1.3", "max_tokens": 3000,
+        "messages": [{"role":"user","content":"Summarise this repo in three bullets."}] }'
+```
+
+**Wider input than 1.1.** Context is 1,048,576 tokens, and it reads
+video and PDF documents in addition to text and images. Discovery
+advertises `modalities: ["text-to-text","image-to-text",
+"video-to-text","pdf-to-text"]`, `input: "text+image+video+pdf"`,
+`output: "text"`.
+
+> **Audio is not offered on 1.3, deliberately.** Meta's model reference
+> lists audio with an asterisk, and the footnote is a negative one:
+> audio understanding on this checkpoint is *"currently not fully
+> supported"*, response quality *"may be degraded"*, and it points you
+> at **Muse Spark 1.2** or **Muse Voice Transcribe** instead. Vera
+> therefore does not advertise `audio-to-text` for 1.3 — sending audio
+> is unsupported, not merely lower quality. For speech-to-text use the
+> `moonshine` connector.
+
+### Meta Muse Image 1.0 — `POST /v1/infer/muse-image-1.0`
+
+**Text → image.** A separate connector from Spark (`id: "meta-image"`),
+because it is a different API family: Spark posts to Meta's Anthropic
+Messages endpoint, while Muse Image is served by Meta's
+OpenAI-compatible **images** endpoint. Same server-held Meta key, so
+clients still carry only their Vera bearer.
+
+```bash
+curl -X POST https://<your-vera>/v1/infer/muse-image-1.0 \
+  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -d '{ "model": "muse-image-1.0", "n": 1,
+        "prompt": "a red fox trotting through fresh snow, golden hour" }'
+```
+
+**The body is forwarded verbatim**, so send the shape Meta's images
+endpoint expects (`model`, `prompt`, `n`, …) — *not* Anthropic
+`messages`. The response is one buffered JSON body carrying
+base64-encoded images; decode `data[0].b64_json` to get the bytes.
+There is **no streaming** on this connector (`stream_response: false`),
+so `GET /v1/stream/meta-image` is not available.
+
+Discovery advertises `modalities: ["text-to-image"]`, `input: "text"`,
+`output: "image"`.
+
+> Meta also serves Muse Image conversationally on the Responses API
+> (`/v1/responses`), for interleaving reference images and refining
+> across turns. This connector points at the **one-off generations**
+> path only. A conversational image connector would be a second
+> `[[proxy_connectors]]` entry with its own URL — ask your operator.
+
 ### Image models — `POST /v1/infer/stability-image`
 
 ```bash
