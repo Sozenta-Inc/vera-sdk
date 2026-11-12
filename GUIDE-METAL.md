@@ -125,7 +125,7 @@ self-signed (`curl -k` / trust-on-first-use).
 | **Unified model catalog** | `GET /admin/models` — curated ASR rows (installed/active) + Ollama's installed set + `asr_runtime_present`, one call for the whole picker (`admin:read`) |
 | **Install a model** | `POST /admin/models/install {"backend":"llm"\|"asr","model":"…"}` (`admin:write`, audited). ASR: curated catalog only — `whisper-medium` (default), `whisper-large-v3`; sha-pinned download + activation symlink swap + service bounce. LLM: forwarded to Ollama pull (any registry name). Raw `/ollama/api/pull` also works |
 | Remove a model | `DELETE /admin/models/{backend}/{name}` — active ASR model refuses deletion (activate another first) |
-| Ops console | `GET /admin/console` (paste the veya key once) |
+| Ops console | `GET /admin/console` — a metal hub has no Google sign-in, so the console shows a paste box: paste the veya key once (or sign in with `[local_admin]`). With `admin_allow_cidrs` set, only the `[local_admin]` login is an admin over the network; an API key is refused there (CASA 3.3.1) and keeps working on the loopback listener |
 
 Notes:
 - The metal config sets `[server] models_from_proxy = true` (proxy-role
