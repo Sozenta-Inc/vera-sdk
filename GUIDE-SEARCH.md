@@ -35,7 +35,8 @@ Response:
   "backend": "anthropic",
   "cached": false,
   "latency_ms": 4320,
-  "request_id": "..."
+  "request_id": "...",
+  "applied_max_results": 10
 }
 ```
 
@@ -110,7 +111,17 @@ type SearchRequest = {
    *  response — Anthropic still does the underlying call. */
   mode?: 'integrated' | 'raw';
 
-  /** Cap on results. Default 10. Hard ceiling 50. */
+  /** Cap on results (vera#490). Default 10. Clamped to 1–50 and to
+   *  the backend's own cap; out of range is clamped, never refused
+   *  (0 or a negative applies 1, above 50 applies 50). A backend whose
+   *  provider takes a result count is passed it; otherwise the results
+   *  are truncated after the call, first-ranked kept. The response's
+   *  `applied_max_results` names the count that applied.
+   *  `anthropic`: its web_search tool takes no count, so it runs one
+   *  search and the results are truncated; it has no cap below 50.
+   *  In `integrated` mode the answer is synthesized from everything
+   *  that search returned — `max_results` caps `results`, not the
+   *  answer's sources. */
   max_results?: number;
 
   /** Freshness window. Backends that don't support it ignore. */
@@ -175,6 +186,11 @@ type SearchResponse = {
 
   /** Vera-issued correlation id. Use to join against /admin/audit. */
   request_id: string;
+
+  /** The result cap this search applied: the request's `max_results`
+   *  after the default and the clamp (see Request). `results` never
+   *  holds more; it can hold fewer when the backend found fewer. */
+  applied_max_results: number;
 };
 ```
 
